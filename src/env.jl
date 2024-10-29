@@ -1,16 +1,16 @@
 using Pkg
 
-# Activate the environment in the current directory
-Pkg.activate(".")
+# Activate the environment in the current directory without output
+Pkg.activate(".", io=devnull)
 
 # List of packages to add
 packages = [
     "DataFrames",
     "CSV",
-    # Add other necessary packages
+    "FilePathsBase",
 ]
 
-# Add each package
+# Add each package without output
 for pkg in packages
-    Pkg.add(pkg)
+    Pkg.add(pkg; io=devnull)
 end
