@@ -6,6 +6,7 @@ Pkg.activate(".")
 # List of packages to add
 packages = [
     "DataFrames",
+    "CSV",
     # Add other necessary packages
 ]
 
