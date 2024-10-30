@@ -4,6 +4,9 @@
 include("./env.jl")
 
 using DataFrames
+using CSV
+using ArgParse
+using FilePathsBase  # For path manipulations
 
 # Function to parse the FASTA header
 function parse_header(header::AbstractString)
@@ -189,18 +192,42 @@ end
 
 # Main function to execute the script logic
 function main()
-    # Check if the correct number of arguments is provided
-    if length(ARGS) < 1
-        println("Usage: $(basename(PROGRAM_FILE)) <ncbi_file_path> [consensus_fasta_path]")
+    # Set up argument parser
+    s = ArgParseSettings(description="Process NCBI FASTA file and extract regions.")
+
+    @add_arg_table s begin
+        "--ncbi_file_input", "-f"
+            help = "Path to the NCBI FASTA file"
+            required = true
+        "--consensus_fasta", "-c"
+            help = "Path to the consensus FASTA file"
+            default = "Consensus0.fa"
+    end
+
+    parsed_args = parse_args(s)
+
+    # Correct key name based on argument definition
+    ncbi_file_path = parsed_args["ncbi_file_input"]
+    consensus_fasta = parsed_args["consensus_fasta"]
+
+    # If consensus_fasta is not provided, set it to "Consensus0.fa" in the same directory as ncbi_file_path
+    if ismissing(consensus_fasta) || consensus_fasta == nothing
+        input_dir = dirname(abspath(ncbi_file_path))
+        consensus_fasta = joinpath(input_dir, "Consensus0.fa")
+        println("No consensus_fasta provided. Using default path: $consensus_fasta")
+    end
+
+    # Verify that the NCBI FASTA file exists
+    if !isfile(ncbi_file_path)
+        @error "NCBI FASTA file does not exist: $ncbi_file_path"
         exit(1)
     end
 
-    # Get the ncbi_file_path from the first argument
-    ncbi_file_path = ARGS[1]
-
-    # Get the consensus_fasta path from the second argument or use default
-    consensus_fasta_default = "/Users/e.smith.5/Documents/PhD/CD8scape/data/Kemp_example/Consensus0.fa"
-    consensus_fasta = length(ARGS) >= 2 ? ARGS[2] : consensus_fasta_default
+    # Verify that the Consensus FASTA file exists
+    if !isfile(consensus_fasta)
+        @error "Consensus FASTA file does not exist: $consensus_fasta"
+        exit(1)
+    end
 
     # Read metadata from the NCBI FASTA file
     regions_df = read_fasta_metadata(ncbi_file_path)
@@ -214,8 +241,14 @@ function main()
     # Display the updated DataFrame
     println(regions_df)
 
-    # Optionally, save the DataFrame to a CSV file
-    # CSV.write("output.csv", regions_df)
+    # Define the output CSV path in the same directory as the NCBI file
+    input_dir = dirname(abspath(ncbi_file_path))
+    output_csv_path = joinpath(input_dir, "frames.csv")
+
+    # Save the DataFrame to frames.csv in the input directory
+    CSV.write(output_csv_path, regions_df)
+
+    println("DataFrame has been saved to $output_csv_path")
 end
 
 # Execute the main function

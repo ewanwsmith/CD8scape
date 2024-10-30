@@ -8,6 +8,7 @@ packages = [
     "DataFrames",
     "CSV",
     "FilePathsBase",
+    "ArgParse",
 ]
 
 # Add each package without output
