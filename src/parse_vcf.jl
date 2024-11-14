@@ -6,7 +6,7 @@ using ArgParse
 using CSV
 using DataFrames
 using CodecZlib
-import Base.Filesystem: splitext
+import Base.Filesystem: splitext, dirname, basename, joinpath
 
 function parse_command_line()
     s = ArgParseSettings()
@@ -81,6 +81,25 @@ function get_file_extension(filename)
     return ext
 end
 
+function get_base_filename(filepath)
+    filename = basename(filepath)
+    if endswith(filename, ".vcf.gz")
+        base_filename = filename[1:end - length(".vcf.gz")]
+    elseif endswith(filename, ".vcf")
+        base_filename = filename[1:end - length(".vcf")]
+    else
+        base_filename, _ = splitext(filename)
+    end
+    return base_filename
+end
+
+function get_output_file_path(vcf_file_path)
+    dir = dirname(vcf_file_path)
+    base_filename = get_base_filename(vcf_file_path)
+    output_filename = base_filename * ".csv"
+    return joinpath(dir, output_filename)
+end
+
 function main()
     args = parse_command_line()
     vcf_file_path = args["in"]
@@ -90,6 +109,11 @@ function main()
     vcf_dataframe = read_vcf_with_csv(vcf_file_path)
     println("First 5 rows of the DataFrame:")
     display(first(vcf_dataframe, 5))
+
+    # Save the DataFrame as a CSV file in the same directory with the same filename
+    output_file_path = get_output_file_path(vcf_file_path)
+    CSV.write(output_file_path, vcf_dataframe)
+    println("DataFrame saved to $output_file_path")
 end
 
 main()
