@@ -1,0 +1,38 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##bcftoolsVersion=1.21+htslib-1.21
+##bcftoolsCommand=mpileup -Ou -f /Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/refNA.fa /Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/E3i_06R_030_S04_18V19655_sorted.bam
+##reference=file:///Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/refNA.fa
+##contig=<ID=1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2,length=1552>
+##ALT=<ID=*,Description="Represents allele(s) other than observed.">
+##INFO=<ID=INDEL,Number=0,Type=Flag,Description="Indicates that the variant is an INDEL.">
+##INFO=<ID=IDV,Number=1,Type=Integer,Description="Maximum number of raw reads supporting an indel">
+##INFO=<ID=IMF,Number=1,Type=Float,Description="Maximum fraction of raw reads supporting an indel">
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Raw read depth">
+##INFO=<ID=VDB,Number=1,Type=Float,Description="Variant Distance Bias for filtering splice-site artefacts in RNA-seq data (bigger is better)",Version="3">
+##INFO=<ID=RPBZ,Number=1,Type=Float,Description="Mann-Whitney U-z test of Read Position Bias (closer to 0 is better)">
+##INFO=<ID=MQBZ,Number=1,Type=Float,Description="Mann-Whitney U-z test of Mapping Quality Bias (closer to 0 is better)">
+##INFO=<ID=BQBZ,Number=1,Type=Float,Description="Mann-Whitney U-z test of Base Quality Bias (closer to 0 is better)">
+##INFO=<ID=MQSBZ,Number=1,Type=Float,Description="Mann-Whitney U-z test of Mapping Quality vs Strand Bias (closer to 0 is better)">
+##INFO=<ID=SCBZ,Number=1,Type=Float,Description="Mann-Whitney U-z test of Soft-Clip Length Bias (closer to 0 is better)">
+##INFO=<ID=SGB,Number=1,Type=Float,Description="Segregation based metric, http://samtools.github.io/bcftools/rd-SegBias.pdf">
+##INFO=<ID=MQ0F,Number=1,Type=Float,Description="Fraction of MQ0 reads (smaller is better)">
+##FORMAT=<ID=PL,Number=G,Type=Integer,Description="List of Phred-scaled genotype likelihoods">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths (high-quality bases)">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##INFO=<ID=AC,Number=A,Type=Integer,Description="Allele count in genotypes for each ALT allele, in the same order as listed">
+##INFO=<ID=AN,Number=1,Type=Integer,Description="Total number of alleles in called genotypes">
+##INFO=<ID=DP4,Number=4,Type=Integer,Description="Number of high-quality ref-forward , ref-reverse, alt-forward and alt-reverse bases">
+##INFO=<ID=MQ,Number=1,Type=Integer,Description="Average mapping quality">
+##bcftools_callVersion=1.21+htslib-1.21
+##bcftools_callCommand=call -mv -Ob -o /Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/E3i_06R_030_S04_18V19655.bcf; Date=Thu Nov 14 13:12:14 2024
+##bcftools_viewVersion=1.21+htslib-1.21
+##bcftools_viewCommand=view -Ov -o /Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/E3i_06R_030_S04_18V19655.vcf /Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/E3i_06R_030_S04_18V19655.bcf; Date=Thu Nov 14 13:12:14 2024
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	/Users/e.smith.5/Desktop/Alpha2_downloads/Breuer_data/Patient120/NA/E3i_06R_030_S04_18V19655_sorted.bam
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	63	.	A	T	56.6488	.	DP=39;VDB=5.52906e-06;SGB=-0.662043;RPBZ=0;MQBZ=0;MQSBZ=0;BQBZ=-4.32491;SCBZ=-4.79583;MQ0F=0;AC=1;AN=2;DP4=6,9,9,0;MQ=60	GT:PL:AD	0/1:91,0,255:15,7
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	69	.	A	T	41.6824	.	DP=57;VDB=1.33331e-05;SGB=-0.651104;RPBZ=-4.46689;MQBZ=0;MQSBZ=0;BQBZ=-2.02402;SCBZ=-3.20896;MQ0F=0;AC=1;AN=2;DP4=22,9,0,8;MQ=60	GT:PL:AD	0/1:77,0,255:31,8
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	264	.	G	A	225.417	.	DP=323;VDB=0.812284;SGB=-0.693147;MQSBZ=0;MQ0F=0;AC=2;AN=2;DP4=0,0,233,44;MQ=60	GT:PL:AD	1/1:255,255,0:0,277
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	521	.	T	C	228.383	.	DP=239;VDB=0.999138;SGB=-0.693147;RPBZ=0.683574;MQBZ=0;MQSBZ=0;BQBZ=2.1929;SCBZ=-1.28935;MQ0F=0;AC=2;AN=2;DP4=3,0,191,31;MQ=60	GT:PL:AD	1/1:255,255,0:3,222
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	798	.	G	T	225.417	.	DP=245;VDB=0.650169;SGB=-0.693147;MQSBZ=0;MQ0F=0;AC=2;AN=2;DP4=0,0,218,22;MQ=60	GT:PL:AD	1/1:255,255,0:0,240
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	1469	.	A	G	228.382	.	DP=172;VDB=2.38634e-19;SGB=-0.693147;RPBZ=0.100499;MQBZ=0;MQSBZ=0;BQBZ=1.84211;SCBZ=1.98602;MQ0F=0;AC=2;AN=2;DP4=2,0,142,15;MQ=60	GT:PL:AD	1/1:255,255,0:2,156
+1227543_|_NA_|_A/Newport/8717/2018_|_EPI_ISL_309465_|__|_A_/_H3N2	1509	.	A	T	81.8055	.	DP=105;VDB=4.97067e-08;SGB=-0.690438;RPBZ=-7.81896;MQBZ=0;MQSBZ=0;BQBZ=2.31129;SCBZ=-8.79475;MQ0F=0;AC=1;AN=2;DP4=86,1,11,6;MQ=60	GT:PL:AD	0/1:116,0,107:87,17
