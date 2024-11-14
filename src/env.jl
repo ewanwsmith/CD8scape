@@ -9,6 +9,7 @@ packages = [
     "CSV",
     "FilePathsBase",
     "ArgParse",
+    "CodecZlib",
 ]
 
 # Add each package without output
