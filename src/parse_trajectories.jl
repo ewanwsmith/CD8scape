@@ -1,8 +1,8 @@
-#!/usr/bin/env julia
-
 include("./env.jl")
 
-using DataFrames, CSV, FilePathsBase
+using DataFrames
+using CSV
+using FilePathsBase
 
 # Function to read Times.in and return a vector of time points
 function read_times(times_file)
@@ -16,10 +16,13 @@ function read_times(times_file)
 end
 
 # Function to parse the .out file and return a DataFrame
-function parse_trajectories(trajectories_file, times)
+function parse_trajectories(trajectories_file, times_file)
+    # Read the times
+    times = read_times(times_file)
+
     # Initialize the DataFrame with predefined columns and correct types
     data = DataFrame(Locus = Int[], Consensus = String[], Variant = String[])
-    
+
     for t in times
         for base in ["A", "C", "G", "T"]
             col_name = Symbol("Count_$(base)_t$(t)")
@@ -81,48 +84,26 @@ function parse_trajectories(trajectories_file, times)
             push!(data, row)
         end
     end
+
+    # Return the parsed DataFrame
     return data
 end
 
-# Main function to process command-line arguments and run the script
-function main()
-    # Check if the required arguments are provided
-    if length(ARGS) < 1
-        println("Usage: julia script_name.jl path_to_out_file [path_to_Times.in]")
-        exit(1)
-    end
-
-    # Paths to the input files
-    trajectories_file = ARGS[1]
-
-    if length(ARGS) >= 2
-        times_file = ARGS[2]
-    else
-        # Default to Times.in in the same directory as the .out file
-        trajectories_path = Path(trajectories_file)
-        times_file = string(parent(trajectories_path), "/Times.in")
-    end
-
-    # Check if files exist
-    if !isfile(trajectories_file)
-        println("Error: Trajectories file not found at path: $trajectories_file")
-        exit(1)
-    end
-
-    if !isfile(times_file)
-        println("Error: Times.in file not found at path: $times_file")
-        exit(1)
-    end
-
-    # Read the times and trajectories
-    times = read_times(times_file)
-    trajectories_df = parse_trajectories(trajectories_file, times)
-
-    # Save the DataFrame to a CSV file
-    output_file = string(parent(Path(trajectories_file)), "/trajectories.csv")
-    CSV.write(output_file, trajectories_df)
-    println("DataFrame saved to $output_file")
+# Function to determine the output file path
+function get_output_file_path(trajectories_file)
+    trajectories_path = Path(trajectories_file)
+    output_file = string(parent(trajectories_path), "/trajectories.csv")
+    return output_file
 end
 
-# Run the main function
-main()
+# Replace with your actual file paths
+trajectories_file = "/Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/single_locus_trajectories10.out"
+times_file = "/Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/Times.in"
+
+# Parse the trajectories
+trajectories_df = parse_trajectories(trajectories_file, times_file)
+
+# Optionally, save the DataFrame to a CSV file
+output_file = get_output_file_path(trajectories_file)
+CSV.write(output_file, trajectories_df)
+println("DataFrame saved to $output_file")
