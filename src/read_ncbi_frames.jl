@@ -210,12 +210,12 @@ function main()
     ncbi_file_path = parsed_args["ncbi_file_input"]
     consensus_fasta = parsed_args["consensus_fasta"]
 
-    # If consensus_fasta is not provided, set it to "Consensus0.fa" in the same directory as ncbi_file_path
-    if ismissing(consensus_fasta) || consensus_fasta == nothing
-        input_dir = dirname(abspath(ncbi_file_path))
-        consensus_fasta = joinpath(input_dir, "Consensus0.fa")
-        println("No consensus_fasta provided. Using default path: $consensus_fasta")
-    end
+        # If consensus_fasta is not provided, set it to "Consensus0.fa" in the same directory as ncbi_file_path
+        if ismissing(consensus_fasta) || isnothing(consensus_fasta)
+            input_dir = dirname(abspath(ncbi_file_path))
+            consensus_fasta = joinpath(input_dir, "Consensus0.fa")
+            println("No consensus_fasta provided. Using default path: $consensus_fasta")
+        end
 
     # Verify that the NCBI FASTA file exists
     if !isfile(ncbi_file_path)

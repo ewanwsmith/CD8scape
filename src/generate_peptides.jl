@@ -117,15 +117,15 @@ translated = translate_sequences(edited)
 function generate_peptides(sequence::String, locus::Int, substr_lengths::Vector{Int})
     peptides = String[]
     for substr_len in substr_lengths
-        # Ensure the locus is included in the substring
-        start_pos_min = max(1, locus - substr_len + 1)
-        start_pos_max = min(length(sequence) - substr_len + 1, locus)
+        # Calculate safe indexing bounds using `eachindex`
+        start_pos_min = max(first(eachindex(sequence)), locus - substr_len + 1)
+        start_pos_max = min(last(eachindex(sequence)) - substr_len + 1, locus)
 
         for start_pos in start_pos_min:start_pos_max
             end_pos = start_pos + substr_len - 1
             
             # Ensure the substring includes the locus character
-            if end_pos <= length(sequence) && (locus >= start_pos && locus <= end_pos)
+            if end_pos <= last(eachindex(sequence)) && (locus >= start_pos && locus <= end_pos)
                 push!(peptides, sequence[start_pos:end_pos])
             end
         end
@@ -150,13 +150,16 @@ function add_peptides_columns!(df::DataFrame, relative_locus_col::Symbol, consen
 
         # Ensure the lists are of equal length
         if length(consensus_peptides) == length(variant_peptides)
-            for j in 1:length(consensus_peptides)
+            for j in eachindex(consensus_peptides)
                 consensus_peptide = consensus_peptides[j]
                 variant_peptide = variant_peptides[j]
 
+                # Calculate the peptide length safely using `eachindex`
+                peptide_length = last(eachindex(consensus_peptide))
+                sequence_length = last(eachindex(row[consensus_col]))
+
                 # Calculate the position of the locus within the peptide (1-based index)
-                peptide_length = length(consensus_peptide)
-                site_position = row[:AA_Locus] - (length(row[consensus_col]) - peptide_length)
+                site_position = row[:AA_Locus] - (sequence_length - peptide_length)
 
                 # Construct the Peptide_label
                 peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)_$site_position"
