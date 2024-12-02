@@ -6,7 +6,6 @@ include("./env.jl")
 using DataFrames
 using CSV
 using ArgParse
-# using FilePathsBase  # Removed to prevent path handling conflicts
 
 # Function to read the locus file and return a DataFrame
 function read_locus_file(filepath::String)::DataFrame
