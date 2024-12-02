@@ -1,19 +1,12 @@
-#!/usr/bin/env julia
-
-"""
-A Julia script to convert a .dat frames file into a CSV file.
-
-Usage:
-    julia read_samfire_frames.jl -f /path/to/frames.dat
-"""
-
 # Include environment settings
 include("./env.jl")
 
 using DataFrames
 using CSV
 using FilePathsBase
-using ArgParse
+
+# Removed ArgParse as it's no longer needed
+# using ArgParse
 
 # Function to read the .dat file and create the DataFrame with a combined "Region" column
 function read_dat_file(filepath::String)::DataFrame
@@ -85,28 +78,25 @@ function save_dataframe_as_csv(df::DataFrame, input_filepath::String, output_fil
     println("DataFrame successfully saved to $output_filepath")
 end
 
-# Function to parse command-line arguments
-function parse_command_line_args()
-    s = ArgParseSettings(description = "Convert a .dat frames file to CSV.")
-    @add_arg_table s begin
-        "--file", "-f"
-            help = "Path to the frames .dat file"
-            required = true
-            arg_type = String
-    end
-    return parse_args(s)
-end
+# Removed command-line argument parsing function
+# function parse_command_line_args()
+#     ...
+# end
 
 # Main function to orchestrate the processing
 function main()
-    # Parse the command-line arguments
-    parsed_args = parse_command_line_args()
-    frames_filepath = parsed_args["file"]
-    
+    # Option 1: Use a predefined file path
+    # Uncomment the following line and set your file path
+    # frames_filepath = "/path/to/your/frames.dat"
+
+    # Option 2: Prompt the user for the file path
+    print("Enter the path to the frames .dat file: ")
+    frames_filepath = readline()
+
     # Check if the provided file exists
     if !isfile(frames_filepath)
         @error "The file '$frames_filepath' does not exist."
-        exit(1)
+        return
     end
     
     # Read the .dat file and create the DataFrame
