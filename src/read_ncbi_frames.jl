@@ -30,7 +30,7 @@ function parse_header(header::AbstractString)
         # Extract the 'join(...)' part
         join_part, rest_of_header = split(header, ')', limit=2)
         region_str = join_part[6:end]  # Remove 'join('
-        rest_of_header = strip(rest_of_header, [' ', '|'])
+        rest_of_header = strip(rest_of_header)
 
         # Extract accession from the first region
         first_region = first(split(region_str, ','))
@@ -79,6 +79,17 @@ function parse_header(header::AbstractString)
 
         description = length(parts) > 1 ? parts[2] : ""
     end
+
+    # **Modification starts here**
+
+    # Remove leading '|' from the description
+    description = lstrip(description, '|')
+
+    # Remove any content inside square brackets, including the brackets
+    description = replace(description, r"\[.*?\]" => "")
+
+    # Remove any extra whitespace
+    description = strip(description)
 
     return accession, region_str, description
 end
