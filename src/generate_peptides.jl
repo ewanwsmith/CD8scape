@@ -249,7 +249,7 @@ function add_peptides_columns!(
                 site_position = row.AA_Locus - (length(row[consensus_col]) - length(cons_pep))
                 
                 # Create peptide label
-                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)_$site_position"
+                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)"
                 
                 # Append to the flattened DataFrame
                 push!(flattened_peptides_df, (
