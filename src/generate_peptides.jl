@@ -9,7 +9,7 @@ using CSV
 # ------------------------------------------------------------------------------
 
 # Codon to amino acid mapping
-const CODON_TABLE = Dict(
+const CODON_DICT = Dict(
     "ATA" => "I", "ATC" => "I", "ATT" => "I", "ATG" => "M",
     "ACA" => "T", "ACC" => "T", "ACG" => "T", "ACT" => "T",
     "AAC" => "N", "AAT" => "N", "AAA" => "K", "AAG" => "K",
@@ -155,7 +155,7 @@ amino acid sequences using the provided codon table.
 function translate_sequences(df::DataFrame)::DataFrame
     # Function to translate a DNA sequence to a protein sequence
     translate_dna_to_protein(dna_sequence::String)::String = 
-        join([get(CODON_TABLE, uppercase(dna_sequence[i:i+2]), "?") 
+        join([get(CODON_DICT, uppercase(dna_sequence[i:i+2]), "?") 
               for i in 1:3:length(dna_sequence)-2], "")
     
     # Translate Consensus and Variant sequences
@@ -249,7 +249,7 @@ function add_peptides_columns!(
                 site_position = row.AA_Locus - (length(row[consensus_col]) - length(cons_pep))
                 
                 # Create peptide label
-                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)"
+                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant) "
                 
                 # Append to the flattened DataFrame
                 push!(flattened_peptides_df, (
