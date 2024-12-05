@@ -2,7 +2,10 @@
 A Julia script to process an NCBI FASTA file and extract regions.
 
 Usage:
-    Run this script in VSCode.
+    julia script_name.jl <path_to_ncbi_fasta> [path_to_consensus_fasta]
+
+    - If the path to the consensus FASTA file is not provided, the script will
+      look for 'Consensus0.fa' in the same directory as the NCBI FASTA file.
 """
 
 # Include environment settings
@@ -21,14 +24,13 @@ function parse_header(header::AbstractString)
     accession = ""
     region_str = ""  # String representation of regions
     description = ""
-    metadata = Dict{String, String}()
 
     # Check if header contains 'join('
     if occursin("join(", header)
         # Extract the 'join(...)' part
         join_part, rest_of_header = split(header, ')', limit=2)
         region_str = join_part[6:end]  # Remove 'join('
-        rest_of_header = strip(rest_of_header, [' ', '|'])
+        rest_of_header = strip(rest_of_header)
 
         # Extract accession from the first region
         first_region = first(split(region_str, ','))
@@ -56,7 +58,7 @@ function parse_header(header::AbstractString)
         # Join regions with ';' between them
         region_str = join(regions_formatted, ';')
 
-        description_and_metadata = rest_of_header
+        description = rest_of_header
     else
         # Header does not contain 'join('
         parts = split(header, ' ', limit=2)
@@ -75,32 +77,19 @@ function parse_header(header::AbstractString)
             region_str = ""
         end
 
-        description_and_metadata = length(parts) > 1 ? parts[2] : ""
+        description = length(parts) > 1 ? parts[2] : ""
     end
 
-    # Remove leading '|' from description_and_metadata
-    description_and_metadata = strip(description_and_metadata, [' ', '|'])
+    # **Modification starts here**
 
-    # Split description and metadata
-    description_parts = []
-    metadata_parts = []
+    # Remove leading '|' from the description
+    description = lstrip(description, '|')
 
-    # Separate description and metadata enclosed in square brackets
-    tokens = split(description_and_metadata, '['; keepempty=false)
-    for token in tokens
-        token = strip(token)
-        if occursin(']', token)
-            # This is metadata
-            key_value_str = first(split(token, ']'))
-            push!(metadata_parts, key_value_str)
-        else
-            # This is part of the description
-            push!(description_parts, token)
-        end
-    end
+    # Remove any content inside square brackets, including the brackets
+    description = replace(description, r"\[.*?\]" => "")
 
-    # Join the description parts
-    description = join(description_parts, ' ')
+    # Remove any extra whitespace
+    description = strip(description)
 
     return accession, region_str, description
 end
@@ -196,24 +185,24 @@ end
 
 # Main function to execute the script logic
 function main()
-    # Option 1: Use predefined file paths
-    # Uncomment and set your file paths
-    # ncbi_file_path = "/path/to/your/ncbi_file.fa"
-    # consensus_fasta = "/path/to/your/Consensus0.fa"
+    # Check if the script is called with the correct number of arguments
+    if length(ARGS) < 1
+        println("Usage: julia script_name.jl <path_to_ncbi_fasta> [path_to_consensus_fasta]")
+        return
+    end
 
-    # Option 2: Prompt the user for the paths
-    println("Enter the path to the NCBI FASTA file:")
-    ncbi_file_path = readline()
+    # Get the NCBI FASTA file path from the command-line arguments
+    ncbi_file_path = ARGS[1]
 
-    println("Enter the path to the consensus FASTA file (press Enter to use default 'Consensus0.fa'):")
-    consensus_fasta_input = readline()
-    if isempty(consensus_fasta_input)
+    # Get the Consensus FASTA file path if provided
+    consensus_fasta = ""
+    if length(ARGS) >= 2
+        consensus_fasta = ARGS[2]
+    else
         # Use default value in the same directory as ncbi_file_path
         input_dir = dirname(abspath(ncbi_file_path))
         consensus_fasta = joinpath(input_dir, "Consensus0.fa")
-        println("No consensus_fasta provided. Using default path: $consensus_fasta")
-    else
-        consensus_fasta = consensus_fasta_input
+        println("No consensus FASTA provided. Using default path: $consensus_fasta")
     end
 
     # Verify that the NCBI FASTA file exists
