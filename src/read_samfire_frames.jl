@@ -1,9 +1,12 @@
+#!/usr/bin/env julia
+
 # Include environment settings
 include("./env.jl")
 
 using DataFrames
 using CSV
 using FilePathsBase
+using Logging
 
 # Function to read the .dat file and create the DataFrame with "Region", "Consensus_sequence", and "Description" columns
 function read_dat_file(filepath::String)::DataFrame

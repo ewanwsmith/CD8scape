@@ -101,7 +101,7 @@ function check_locus(df::DataFrame)::DataFrame
     df = filter(:Matches_Consensus => identity, df)
     
     # Remove Pulled_Base and Matches_Consensus columns
-    select!(df, Not([:Pulled_Base, :Matches_Consensus]))
+    #select!(df, Not([:Pulled_Base, :Matches_Consensus]))
     
     return df
 end
