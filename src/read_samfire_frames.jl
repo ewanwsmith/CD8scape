@@ -5,10 +5,7 @@ using DataFrames
 using CSV
 using FilePathsBase
 
-# Removed ArgParse as it's no longer needed
-# using ArgParse
-
-# Function to read the .dat file and create the DataFrame with a combined "Region" column
+# Function to read the .dat file and create the DataFrame with "Region", "Consensus_sequence", and "Description" columns
 function read_dat_file(filepath::String)::DataFrame
     # Read all lines from the file
     lines = readlines(filepath)
@@ -16,26 +13,36 @@ function read_dat_file(filepath::String)::DataFrame
     # Initialize vectors to store the data
     regions = String[]
     consensus = String[]
+    descriptions = String[]
     
     # Total number of lines
     n = length(lines)
     
-    # Iterate over the lines in steps of 3 (assuming 3 lines per entry)
+    # Initialize frame counter
+    frame_counter = 1
+    
+    # Iterate over the lines in steps of 2 (assuming 2 lines per entry)
     i = 1
     while i <= n
+        # Ensure that we have at least two lines left for a complete block
+        if i + 1 > n
+            @warn "Incomplete block starting at line $i. Skipping."
+            break
+        end
+        
         # Parse the Start and End from the first line
         start_end = split(strip(lines[i]))
         if length(start_end) < 2
-            @warn "Line $i does not contain two elements. Skipping."
-            i += 1
+            @warn "Line $i does not contain two elements. Skipping this block."
+            i += 2
             continue
         end
         start_val = tryparse(Int, start_end[1])
         end_val = tryparse(Int, start_end[2])
         
         if isnothing(start_val) || isnothing(end_val)
-            @warn "Invalid Start or End values at line $i. Skipping."
-            i += 1
+            @warn "Invalid Start or End values at line $i. Skipping this block."
+            i += 2
             continue
         end
         
@@ -44,21 +51,25 @@ function read_dat_file(filepath::String)::DataFrame
         push!(regions, region)
         
         # Read the Consensus_sequence from the next line
-        if i + 1 > n
-            @warn "Missing Consensus_sequence after line $i. Skipping."
-            break
-        end
         consensus_seq = strip(lines[i + 1])
         push!(consensus, consensus_seq)
         
-        # Skip the third line (protein sequence)
-        i += 3
+        # Generate the Description as "Frame_n"
+        description = "Frame_$(frame_counter)"
+        push!(descriptions, description)
+        
+        # Increment the frame counter
+        frame_counter += 1
+        
+        # Move to the next block
+        i += 2
     end
     
-    # Create the DataFrame with "Region" and "Consensus_sequence"
+    # Create the DataFrame with "Region", "Consensus_sequence", and "Description"
     frames_df = DataFrame(
         Region = regions,
-        Consensus_sequence = consensus
+        Consensus_sequence = consensus,
+        Description = descriptions
     )
     
     return frames_df
@@ -78,20 +89,16 @@ function save_dataframe_as_csv(df::DataFrame, input_filepath::String, output_fil
     println("DataFrame successfully saved to $output_filepath")
 end
 
-# Removed command-line argument parsing function
-# function parse_command_line_args()
-#     ...
-# end
-
 # Main function to orchestrate the processing
 function main()
-    # Option 1: Use a predefined file path
-    # Uncomment the following line and set your file path
-    # frames_filepath = "/path/to/your/frames.dat"
+    # Check if the script is called with the correct number of arguments
+    if length(ARGS) < 1
+        println("Usage: julia script_name.jl <path_to_frames.dat>")
+        return
+    end
 
-    # Option 2: Prompt the user for the file path
-    print("Enter the path to the frames .dat file: ")
-    frames_filepath = readline()
+    # Get the file path from the command-line arguments
+    frames_filepath = ARGS[1]
 
     # Check if the provided file exists
     if !isfile(frames_filepath)
