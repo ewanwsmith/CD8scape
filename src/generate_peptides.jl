@@ -8,25 +8,27 @@ using CSV
 # Constants
 # ------------------------------------------------------------------------------
 
-# Codon to amino acid mapping
-const CODON_DICT = Dict(
-    "ATA" => "I", "ATC" => "I", "ATT" => "I", "ATG" => "M",
-    "ACA" => "T", "ACC" => "T", "ACG" => "T", "ACT" => "T",
-    "AAC" => "N", "AAT" => "N", "AAA" => "K", "AAG" => "K",
-    "AGC" => "S", "AGT" => "S", "AGA" => "R", "AGG" => "R",
-    "CTA" => "L", "CTC" => "L", "CTG" => "L", "CTT" => "L",
-    "CCA" => "P", "CCC" => "P", "CCG" => "P", "CCT" => "P",
-    "CAC" => "H", "CAT" => "H", "CAA" => "Q", "CAG" => "Q",
-    "CGA" => "R", "CGC" => "R", "CGG" => "R", "CGT" => "R",
-    "GTA" => "V", "GTC" => "V", "GTG" => "V", "GTT" => "V",
-    "GCA" => "A", "GCC" => "A", "GCG" => "A", "GCT" => "A",
-    "GAC" => "D", "GAT" => "D", "GAA" => "E", "GAG" => "E",
-    "GGA" => "G", "GGC" => "G", "GGG" => "G", "GGT" => "G",
-    "TCA" => "S", "TCC" => "S", "TCG" => "S", "TCT" => "S",
-    "TTC" => "F", "TTT" => "F", "TTA" => "L", "TTG" => "L",
-    "TAC" => "Y", "TAT" => "Y", "TAA" => "*", "TAG" => "*",
-    "TGC" => "C", "TGT" => "C", "TGA" => "*", "TGG" => "W"
-)
+# Define Codon to amino acid mapping only if it doesn't already exist
+if !@isdefined CODON_DICT
+    const CODON_DICT = Dict(
+        "ATA" => "I", "ATC" => "I", "ATT" => "I", "ATG" => "M",
+        "ACA" => "T", "ACC" => "T", "ACG" => "T", "ACT" => "T",
+        "AAC" => "N", "AAT" => "N", "AAA" => "K", "AAG" => "K",
+        "AGC" => "S", "AGT" => "S", "AGA" => "R", "AGG" => "R",
+        "CTA" => "L", "CTC" => "L", "CTG" => "L", "CTT" => "L",
+        "CCA" => "P", "CCC" => "P", "CCG" => "P", "CCT" => "P",
+        "CAC" => "H", "CAT" => "H", "CAA" => "Q", "CAG" => "Q",
+        "CGA" => "R", "CGC" => "R", "CGG" => "R", "CGT" => "R",
+        "GTA" => "V", "GTC" => "V", "GTG" => "V", "GTT" => "V",
+        "GCA" => "A", "GCC" => "A", "GCG" => "A", "GCT" => "A",
+        "GAC" => "D", "GAT" => "D", "GAA" => "E", "GAG" => "E",
+        "GGA" => "G", "GGC" => "G", "GGG" => "G", "GGT" => "G",
+        "TCA" => "S", "TCC" => "S", "TCG" => "S", "TCT" => "S",
+        "TTC" => "F", "TTT" => "F", "TTA" => "L", "TTG" => "L",
+        "TAC" => "Y", "TAT" => "Y", "TAA" => "*", "TAG" => "*",
+        "TGC" => "C", "TGT" => "C", "TGA" => "*", "TGG" => "W"
+    )
+end
 
 # ------------------------------------------------------------------------------
 # Function Definitions
@@ -244,12 +246,13 @@ function add_peptides_columns!(
         
         # Ensure both peptide lists are of the same length
         if length(consensus_peptides) == length(variant_peptides)
+            counter = 1  # Counter for unique labels
             for (cons_pep, var_pep) in zip(consensus_peptides, variant_peptides)
                 # Calculate site position within the peptide
                 site_position = row.AA_Locus - (length(row[consensus_col]) - length(cons_pep))
                 
-                # Create peptide label
-                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant) "
+                # Create unique peptide label
+                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)_$counter"
                 
                 # Append to the flattened DataFrame
                 push!(flattened_peptides_df, (
@@ -260,6 +263,7 @@ function add_peptides_columns!(
                     var_pep, 
                     peptide_label
                 ))
+                counter += 1  # Increment the counter
             end
         else
             @warn "Mismatched peptide lists in row with Locus $(row.Locus). Skipping this row."
