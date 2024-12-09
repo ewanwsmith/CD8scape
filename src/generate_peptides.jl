@@ -273,6 +273,66 @@ function add_peptides_columns!(
     return flattened_peptides_df
 end
 
+function separate_peptides(df::DataFrame)::DataFrame
+    # Filter out rows where Consensus_Peptide matches Variant_Peptide
+    filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide, df)
+
+    # Create a new DataFrame to hold the transformed data
+    transformed_df = DataFrame(
+        Locus = Int[],
+        Peptide = String[],
+        Peptide_label = String[]
+    )
+
+    # Iterate through each row in the filtered DataFrame
+    for row in eachrow(filtered_df)
+        # Add the Consensus_Peptide row
+        push!(transformed_df, (
+            row.Locus,
+            row.Consensus_Peptide,
+            "$(row.Peptide_label)_C"
+        ))
+
+        # Add the Variant_Peptide row
+        push!(transformed_df, (
+            row.Locus,
+            row.Variant_Peptide,
+            "$(row.Peptide_label)_V"
+        ))
+    end
+
+    return transformed_df
+end
+
+"""
+    write_peptides_file_no_headers(df::DataFrame, folder_path::String)
+
+Writes the peptide sequences from the DataFrame to a `.pep` file in the specified folder.
+Each line in the file contains a peptide sequence without headers.
+
+# Arguments
+- `df::DataFrame`: The input DataFrame containing the `Peptide` column.
+- `folder_path::String`: The path to the folder where the `.pep` file will be written.
+
+# Output
+- A `.pep` file named `Peptides.pep` in the specified folder, with sequences only.
+"""
+function write_peptides_file_no_headers(df::DataFrame, folder_path::String)
+    # Construct the file path for the .pep file
+    file_path = joinpath(folder_path, "Peptides.pep")
+    
+    # Open the file for writing
+    open(file_path, "w") do io
+        for row in eachrow(df)
+            # Write only the peptide sequence
+            println(io, row.Peptide)
+        end
+    end
+
+    println("Peptides.pep file has been written to: $file_path")
+end
+
+
 # ------------------------------------------------------------------------------
 # Data Processing Pipeline
 # ------------------------------------------------------------------------------
@@ -306,3 +366,12 @@ flattened_peptides_df = add_peptides_columns!(
 
 # Display the resulting DataFrame
 display(flattened_peptides_df)
+
+# Example usage
+transformed_df = separate_peptides(flattened_peptides_df)
+
+# Display the resulting DataFrame
+display(transformed_df)
+
+# Example usage
+write_peptides_file_no_headers(transformed_df, "/Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example")
