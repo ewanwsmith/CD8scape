@@ -10,6 +10,7 @@ packages = [
     "FilePathsBase",
     "ArgParse",
     "CodecZlib",
+    "XLSX",
 ]
 
 # Add each package without output
