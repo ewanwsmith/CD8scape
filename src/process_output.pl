@@ -2,9 +2,6 @@
 use strict;
 use warnings;
 
-# This version handles lines with extra tabs/spaces in the allele line.
-# It filters out empty fields, ensuring that only non-empty columns are treated as haplotypes.
-
 my $input_file = shift or die "Usage: $0 input_file.tsv > output.csv\n";
 open my $fh, '<', $input_file or die "Could not open '$input_file': $!";
 
