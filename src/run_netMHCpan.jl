@@ -11,7 +11,7 @@ allele_list = readlines(alleles_file)
 alleles = join(allele_list, ",")
 
 # Define other variable options
-xlsfile_path = "/Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/RSV.tsv"
+xlsfile_path = "/Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/netMHCpan_output.tsv"
 
 # Construct the command without the binding affinity option
 cmd = `./netMHCpan -p /Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/Peptides.pep \
