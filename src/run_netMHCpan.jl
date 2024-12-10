@@ -11,12 +11,10 @@ allele_list = readlines(alleles_file)
 alleles = join(allele_list, ",")
 
 # Define other variable options
-binding_affinity_option = "-BA"
 xlsfile_path = "/Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/RSV.tsv"
 
-# Construct the command with `-xls` directly in the command text
+# Construct the command without the binding affinity option
 cmd = `./netMHCpan -p /Users/e.smith.5/Documents/PhD/CD8scape/data/RSV_example/Peptides.pep \
-    $(binding_affinity_option) \
     -xls \
     -a $(alleles) \
     -xlsfile $(xlsfile_path)`
