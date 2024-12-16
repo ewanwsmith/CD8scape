@@ -130,9 +130,6 @@ function main()
     println("Processing and joining files...")
     result_df = process_and_join(folder_path)
 
-    println("Initial Processed DataFrame:")
-    display(result_df)
-
     println("Reshaping HLA-related data...")
     long_result_df = reshape_hla_data(result_df)
 
@@ -142,8 +139,12 @@ function main()
     println("Calculating net scores...")
     final_result_df = calculate_net_scores(combined_result_df)
 
-    println("Final DataFrame with Net Scores:")
-    display(final_result_df)
+    # Save the output to net_scores.csv in the input folder
+    output_path = joinpath(folder_path, "net_scores.csv")
+    println("Saving results to $output_path...")
+    CSV.write(output_path, final_result_df)
+
+    println("Processing completed successfully!")
 end
 
 main()
