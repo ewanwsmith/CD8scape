@@ -1,124 +1,118 @@
 #!/usr/bin/env julia
 
-# Include environment settings
-include("./env.jl")
-
 using DataFrames
 using CSV
 using FilePathsBase
 using Logging
+import Base.Filesystem: joinpath, dirname, isfile
 
-# Function to read the .dat file and create the DataFrame with "Region", "Consensus_sequence", and "Description" columns
+"""
+Reads `Reading_Frames.dat` where each block is 3 lines:
+1) `start end`
+2) Nucleotide consensus sequence
+3) (ignored)
+
+Generates a DataFrame with columns:
+- Region            (e.g. "77,496")
+- Consensus_sequence
+- Description       (auto-labeled "Frame_1", "Frame_2", etc.)
+
+Returns a DataFrame with rows equal to how many 3-line blocks it successfully parsed.
+"""
 function read_dat_file(filepath::String)::DataFrame
-    # Read all lines from the file
     lines = readlines(filepath)
-    
-    # Initialize vectors to store the data
-    regions = String[]
-    consensus = String[]
-    descriptions = String[]
-    
-    # Total number of lines
-    n = length(lines)
-    
-    # Initialize frame counter
-    frame_counter = 1
-    
-    # Iterate over the lines in steps of 2 (assuming 2 lines per entry)
+
+    regions         = String[]
+    consensus       = String[]
+    descriptions    = String[]
+
+    frame_counter   = 1
     i = 1
+    n = length(lines)
+
     while i <= n
-        # Ensure that we have at least two lines left for a complete block
-        if i + 1 > n
+        # Ensure we have at least 2 lines for Region + Consensus
+        # and 1 extra line to skip. So total 3 lines needed.
+        if i + 2 > n
             @warn "Incomplete block starting at line $i. Skipping."
             break
         end
-        
-        # Parse the Start and End from the first line
+
+        # ─────────────────────────────────────────────────────
+        # (1) Region line: parse two integers, e.g. "77 496"
         start_end = split(strip(lines[i]))
         if length(start_end) < 2
-            @warn "Line $i does not contain two elements. Skipping this block."
-            i += 2
+            @warn "Line $i does not contain two integers. Skipping this 3-line block."
+            i += 3
             continue
         end
+
         start_val = tryparse(Int, start_end[1])
-        end_val = tryparse(Int, start_end[2])
-        
+        end_val   = tryparse(Int, start_end[2])
         if isnothing(start_val) || isnothing(end_val)
-            @warn "Invalid Start or End values at line $i. Skipping this block."
-            i += 2
+            @warn "Invalid Start/End at line $i. Skipping this 3-line block."
+            i += 3
             continue
         end
-        
-        # Combine Start and End into "Region" as "Start,End"
-        region = "$(start_val),$(end_val)"
-        push!(regions, region)
-        
-        # Read the Consensus_sequence from the next line
+
+        region_str = "$(start_val),$(end_val)"
+        push!(regions, region_str)
+
+        # ─────────────────────────────────────────────────────
+        # (2) Consensus line
         consensus_seq = strip(lines[i + 1])
         push!(consensus, consensus_seq)
-        
-        # Generate the Description as "Frame_n"
-        description = "Frame_$(frame_counter)"
-        push!(descriptions, description)
-        
-        # Increment the frame counter
+
+        # ─────────────────────────────────────────────────────
+        # (3) Skip the third line entirely (the amino-acid line)
+        # but create a Description = "Frame_<n>"
+        desc_str = "Frame_$(frame_counter)"
+        push!(descriptions, desc_str)
+
         frame_counter += 1
-        
-        # Move to the next block
-        i += 2
+        i += 3
     end
-    
-    # Create the DataFrame with "Region", "Consensus_sequence", and "Description"
+
     frames_df = DataFrame(
-        Region = regions,
+        Region            = regions,
         Consensus_sequence = consensus,
-        Description = descriptions
+        Description       = descriptions
     )
-    
+
     return frames_df
 end
 
-# Function to save DataFrame as CSV in the same directory as the input file
+"""
+Writes the given DataFrame to `frames.csv` in the same directory as the `.dat` file.
+"""
 function save_dataframe_as_csv(df::DataFrame, input_filepath::String, output_filename::String="frames.csv")
-    # Extract the directory from the input file path
     directory = dirname(input_filepath)
-    
-    # Construct the output file path
     output_filepath = joinpath(directory, output_filename)
-    
-    # Write the DataFrame to CSV
     CSV.write(output_filepath, df)
-    
     println("DataFrame successfully saved to $output_filepath")
 end
 
-# Main function to orchestrate the processing
 function main()
-    # Check if the script is called with the correct number of arguments
     if length(ARGS) < 1
-        println("Usage: julia script_name.jl <path_to_frames.dat>")
+        println("Usage: julia script_name.jl <folder_path>")
         return
     end
 
-    # Get the file path from the command-line arguments
-    frames_filepath = ARGS[1]
+    folder_path = ARGS[1]
+    dat_filepath = joinpath(folder_path, "Reading_Frames.dat")
 
-    # Check if the provided file exists
-    if !isfile(frames_filepath)
-        @error "The file '$frames_filepath' does not exist."
+    if !isfile(dat_filepath)
+        @error "The file 'Reading_Frames.dat' was not found in '$folder_path'."
         return
     end
-    
-    # Read the .dat file and create the DataFrame
-    frames_df = read_dat_file(frames_filepath)
-    
-    # Display the DataFrame (optional)
+
+    frames_df = read_dat_file(dat_filepath)
     println("Generated DataFrame:")
-    println(frames_df)
-    
-    # Save the DataFrame as frames.csv in the same directory as frames_filepath
-    save_dataframe_as_csv(frames_df, frames_filepath)
+    display(frames_df)
+
+    save_dataframe_as_csv(frames_df, dat_filepath, "frames.csv")
 end
 
-# Execute the main function
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

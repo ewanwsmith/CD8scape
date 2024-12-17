@@ -1,72 +1,64 @@
-"""
-A Julia script to process an NCBI FASTA file and extract regions.
+#!/usr/bin/env julia
 
+"""
 Usage:
-    julia script_name.jl <path_to_ncbi_fasta> [path_to_consensus_fasta]
+    julia script_name.jl <folder_path>
 
-    - If the path to the consensus FASTA file is not provided, the script will
-      look for 'Consensus0.fa' in the same directory as the NCBI FASTA file.
+This script:
+1) Finds sequences.(fa|fasta) for "reference reading frames".
+2) Finds Consensus0.(fa|fasta) for the "consensus sequence".
+3) Parses each header in sequences-file for Region & Description.
+4) Reads the entire sequence from the consensus-file.
+5) Extracts each Region's subsequence from the consensus, storing it as `Consensus_sequence`.
+6) Saves a single `frames.csv` with columns: Region, Consensus_sequence, Description.
 """
 
-# Include environment settings
+# Include environment settings (comment out if not needed)
 include("./env.jl")
 
 using DataFrames
 using CSV
-using FilePathsBase  # For path manipulations
+using FilePathsBase
+import Base.Filesystem: joinpath, abspath, isfile, findfirst
 
-# Function to parse the FASTA header
+# ──────────────────────────────────────────────────────────────────────────────
+# Parse the FASTA header, extracting Region (like "77,496" or "77,496;606,980") 
+# and Description (any leftover text).
 function parse_header(header::AbstractString)
-    # Remove the initial '>' if present
+    # Remove '>'
     header = strip(header, ['>'])
 
-    # Initialize variables
-    accession = ""
-    region_str = ""  # String representation of regions
+    region_str  = ""
     description = ""
 
-    # Check if header contains 'join('
+    # If header has "join(" syntax, e.g. >join(X:77..496,Y:606..980) ...
     if occursin("join(", header)
-        # Extract the 'join(...)' part
-        join_part, rest_of_header = split(header, ')', limit=2)
-        region_str = join_part[6:end]  # Remove 'join('
+        join_part, rest_of_header = split(header, ')'; limit=2)
+        raw_coords = join_part[6:end]  # remove 'join('
         rest_of_header = strip(rest_of_header)
 
-        # Extract accession from the first region
-        first_region = first(split(region_str, ','))
-        acc_and_coords = split(first_region, ':')
-        if !isempty(acc_and_coords)
-            accession = acc_and_coords[1]
-        end
-
-        # Process region_str to remove accession numbers and reformat
-        region_parts = split(region_str, ',')
-        regions_formatted = []
+        # raw_coords might look like: "acc1:77..496,acc2:606..980"
+        region_parts = split(raw_coords, ',')
+        formatted = String[]
         for region in region_parts
-            # Remove accession number if present
             acc_and_coords = split(region, ':')
             coords = length(acc_and_coords) == 2 ? acc_and_coords[2] : acc_and_coords[1]
-            # Split start and end positions
             if occursin("..", coords)
                 start_pos, end_pos = split(coords, "..")
-                formatted_region = "$start_pos,$end_pos"
+                push!(formatted, "$start_pos,$end_pos")
             else
-                formatted_region = "$coords,$coords"
+                push!(formatted, "$coords,$coords")
             end
-            push!(regions_formatted, formatted_region)
         end
-        # Join regions with ';' between them
-        region_str = join(regions_formatted, ';')
-
+        region_str = join(formatted, ';')
         description = rest_of_header
     else
-        # Header does not contain 'join('
-        parts = split(header, ' ', limit=2)
-        acc_and_coords = split(parts[1], ':')
-        accession = acc_and_coords[1]
-        if length(acc_and_coords) == 2
-            coords = acc_and_coords[2]
-            # Split start and end positions
+        # Typical header: >accession:77..496 Description text...
+        parts = split(header, ' '; limit=2)
+        accession_coords = split(parts[1], ':')
+
+        if length(accession_coords) == 2
+            coords = accession_coords[2]
             if occursin("..", coords)
                 start_pos, end_pos = split(coords, "..")
                 region_str = "$start_pos,$end_pos"
@@ -80,29 +72,19 @@ function parse_header(header::AbstractString)
         description = length(parts) > 1 ? parts[2] : ""
     end
 
-    # **Modification starts here**
-
-    # Remove leading '|' from the description
+    # Clean description
     description = lstrip(description, '|')
-
-    # Remove any content inside square brackets, including the brackets
     description = replace(description, r"\[.*?\]" => "")
-
-    # Remove any extra whitespace
     description = strip(description)
 
-    return accession, region_str, description
+    return region_str, description
 end
 
-# Function to read FASTA metadata
-function read_fasta_metadata(file_path::String)
-    # Initialize an empty DataFrame with only the desired columns
-    df = DataFrame(
-        Description = String[],
-        Region = String[]
-    )
-
-    # Open the file for reading
+# ──────────────────────────────────────────────────────────────────────────────
+# Reads the FASTA file (headers only). Builds a DataFrame with columns:
+#   Region, Description
+function read_fasta_metadata(file_path::String)::DataFrame
+    df = DataFrame(Region=String[], Description=String[])
     open(file_path, "r") do io
         header = ""
         for line in eachline(io)
@@ -110,135 +92,122 @@ function read_fasta_metadata(file_path::String)
             if isempty(line)
                 continue
             elseif startswith(line, '>')
-                # If there is a previous header, process it
+                # If there's a previous header, parse it first
                 if !isempty(header)
-                    accession, region_str, description = parse_header(header)
-                    # Add the row to the DataFrame
-                    push!(df, (
-                        description,
-                        region_str
-                    ))
+                    reg_str, desc = parse_header(header)
+                    push!(df, (reg_str, desc))
                 end
-                # Update the header
                 header = line
             else
-                # Skip sequence lines, as we don't need them
+                # Sequence lines are ignored here
                 continue
             end
         end
-        # Process the last header
+        # Parse the last header if any
         if !isempty(header)
-            accession, region_str, description = parse_header(header)
-            push!(df, (
-                description,
-                region_str
-            ))
+            reg_str, desc = parse_header(header)
+            push!(df, (reg_str, desc))
         end
     end
-
     return df
 end
 
-# Function to read the consensus sequence from a FASTA file
+# ──────────────────────────────────────────────────────────────────────────────
+# Reads a single-sequence FASTA file (like `Consensus0.fa`), returning the
+# entire consensus as a single string.
 function read_fasta_sequence(file_path::String)::String
-    sequence = ""
+    seq = ""
     open(file_path, "r") do io
         for line in eachline(io)
             line = strip(line)
             if isempty(line) || startswith(line, '>')
-                continue  # Skip headers and empty lines
-            else
-                sequence *= line  # Accumulate sequence lines
+                continue
             end
+            seq *= line
         end
     end
-    return sequence
+    return seq
 end
 
-# Function to extract and concatenate sequences based on regions
-function extract_regions_sequence(region_str::String, sequence::String)::String
-    # Split the region string into individual regions
+# ──────────────────────────────────────────────────────────────────────────────
+# Given a region string like "77,496" or multiple coords "77,496;606,980"
+# plus the consensus sequence, return the concatenated subsequence(s).
+function extract_regions_sequence(region_str::String, consensus::String)::String
+    if isempty(region_str)
+        return ""
+    end
+
     regions = split(region_str, ';')
-    subsequences = []
+    subseqs = String[]
     for region in regions
         start_end = split(region, ',')
         if length(start_end) != 2
             error("Invalid region format: $region")
         end
         start_pos = parse(Int, start_end[1])
-        end_pos = parse(Int, start_end[2])
-        # Check that positions are within bounds
-        if start_pos < 1 || end_pos > length(sequence)
-            error("Region positions out of bounds: $start_pos to $end_pos")
+        end_pos   = parse(Int, start_end[2])
+        if start_pos < 1 || end_pos > length(consensus)
+            error("Region out of bounds: $start_pos,$end_pos for consensus length $(length(consensus))")
         end
-        if start_pos > end_pos
-            error("Start position greater than end position in region: $region")
-        end
-        # Extract the substring from the consensus sequence
-        subseq = sequence[start_pos:end_pos]
-        push!(subsequences, subseq)
+        push!(subseqs, consensus[start_pos:end_pos])
     end
-    # Concatenate subsequences if multiple regions
-    concatenated_seq = join(subsequences, "")
-    return concatenated_seq
+    return join(subseqs, "")
 end
 
-# Main function to execute the script logic
+# ──────────────────────────────────────────────────────────────────────────────
 function main()
-    # Check if the script is called with the correct number of arguments
     if length(ARGS) < 1
-        println("Usage: julia script_name.jl <path_to_ncbi_fasta> [path_to_consensus_fasta]")
+        println("Usage: julia script_name.jl <folder_path>")
         return
     end
 
-    # Get the NCBI FASTA file path from the command-line arguments
-    ncbi_file_path = ARGS[1]
+    folder_path = abspath(ARGS[1])
 
-    # Get the Consensus FASTA file path if provided
-    consensus_fasta = ""
-    if length(ARGS) >= 2
-        consensus_fasta = ARGS[2]
-    else
-        # Use default value in the same directory as ncbi_file_path
-        input_dir = dirname(abspath(ncbi_file_path))
-        consensus_fasta = joinpath(input_dir, "Consensus0.fa")
-        println("No consensus FASTA provided. Using default path: $consensus_fasta")
+    # Attempt to find sequences.(fa|fasta)
+    possible_paths_seq = [
+        joinpath(folder_path, "sequences.fa"),
+        joinpath(folder_path, "sequences.fasta")
+    ]
+    idx_seq = findfirst(isfile, possible_paths_seq)
+    if idx_seq === nothing
+        error("No sequences.fa or sequences.fasta file found in $folder_path")
     end
+    sequences_fa = possible_paths_seq[idx_seq]
 
-    # Verify that the NCBI FASTA file exists
-    if !isfile(ncbi_file_path)
-        @error "NCBI FASTA file does not exist: $ncbi_file_path"
-        return
+    # Attempt to find Consensus0.(fa|fasta)
+    possible_paths_cons = [
+        joinpath(folder_path, "Consensus0.fa"),
+        joinpath(folder_path, "Consensus0.fasta")
+    ]
+    idx_cons = findfirst(isfile, possible_paths_cons)
+    if idx_cons === nothing
+        error("No Consensus0.fa or Consensus0.fasta file found in $folder_path")
     end
+    consensus_fa = possible_paths_cons[idx_cons]
 
-    # Verify that the Consensus FASTA file exists
-    if !isfile(consensus_fasta)
-        @error "Consensus FASTA file does not exist: $consensus_fasta"
-        return
-    end
+    println("Using sequences file: $sequences_fa")
+    println("Using consensus file: $consensus_fa")
 
-    # Read metadata from the NCBI FASTA file
-    regions_df = read_fasta_metadata(ncbi_file_path)
+    # 1) Parse "sequences" headers → DataFrame(Region, Description)
+    df = read_fasta_metadata(sequences_fa)
+    
+    # 2) Read entire consensus sequence from "Consensus0"
+    consensus_seq = read_fasta_sequence(consensus_fa)
 
-    # Read the consensus sequence
-    consensus_seq = read_fasta_sequence(consensus_fasta)
+    # 3) For each row, extract the corresponding subsequence from the consensus
+    #    and store it in a new column :Consensus_sequence
+    df[!, :Consensus_sequence] = [extract_regions_sequence(df.Region[i], consensus_seq) for i in 1:nrow(df)]
 
-    # Add a new column "Consensus_sequence" with the extracted sequences
-    regions_df[!, :Consensus_sequence] = [extract_regions_sequence(regions_df.Region[i], consensus_seq) for i in 1:nrow(regions_df)]
+    # We want columns: Region, Consensus_sequence, Description
+    # So reorder them as desired
+    final_df = select(df, :Region, :Consensus_sequence, :Description)
 
-    # Display the updated DataFrame
-    println("Generated DataFrame:")
-    println(regions_df)
-
-    # Define the output CSV path in the same directory as the NCBI file
-    input_dir = dirname(abspath(ncbi_file_path))
-    output_csv_path = joinpath(input_dir, "frames.csv")
-
-    # Save the DataFrame to frames.csv in the input directory
-    CSV.write(output_csv_path, regions_df)
-
-    println("DataFrame has been saved to $output_csv_path")
+    # 4) Write final DataFrame to frames.csv
+    output_csv = joinpath(folder_path, "frames.csv")
+    CSV.write(output_csv, final_df)
+    println("DataFrame written to $output_csv with columns: Region, Consensus_sequence, Description")
 end
 
-# Execute the main function
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
