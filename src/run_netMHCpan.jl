@@ -18,6 +18,25 @@ function parse_arguments()
     return args
 end
 
+# Function to get netMHCpan path from settings.txt
+function get_netMHCpan_path()
+    settings_file = joinpath(@__DIR__, "settings.txt")
+    if !isfile(settings_file)
+        error("settings.txt not found in the script directory. Please provide the file.")
+    end
+
+    # Read the first non-comment line
+    open(settings_file) do file
+        for line in eachline(file)
+            line = strip(line)
+            if !isempty(line) && !startswith(line, "#")
+                return line
+            end
+        end
+    end
+    error("No valid netMHCpan path found in settings.txt.")
+end
+
 # Main function
 function main()
     # Parse the arguments
@@ -36,8 +55,11 @@ function main()
         end
     end
 
+    # Get netMHCpan installation path
+    netMHCpan_path = get_netMHCpan_path()
+
     # Change directory to netMHCpan installation path
-    cd("/Users/e.smith.5/Documents/PhD/Software/netMHCpan-4.1")
+    cd(netMHCpan_path)
 
     # Read only the first column from the alleles file
     allele_list = open(alleles_file) do file
