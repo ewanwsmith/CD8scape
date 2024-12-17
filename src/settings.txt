@@ -1,0 +1,2 @@
+# netMCpan installation path
+/Users/e.smith.5/Documents/PhD/Software/netMHCpan-4.1
