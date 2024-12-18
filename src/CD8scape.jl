@@ -227,7 +227,7 @@ elseif command == "run"
         exit(1)
     end
 
-    println("Pipeline run stage finished successfully.")
+    println("Run stage finished successfully.")
 
 else
     # If the command is not recognized, print help and exit.

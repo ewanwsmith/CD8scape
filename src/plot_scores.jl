@@ -97,7 +97,7 @@ redirect_stdout(devnull) do
 
         # Save the combined plot as a JPEG file
         output_path <- file.path(folder_path, "net_scores.jpeg")
-        ggsave(output_path, plot = rank_plots, width = 10, height = 12, units = "in", dpi = 300)
+        ggsave(output_path, plot = rank_plots, width = 10, height = 20, units = "in", dpi = 300)
 
         options(warn = 0)  # Restore warning settings
         """
