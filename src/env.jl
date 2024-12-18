@@ -23,6 +23,8 @@ for pkg in packages
     Pkg.add(pkg; io = devnull)
 end
 
+println("Julia dependencies installed.")
+
 # Silently install R packages using RCall
 R"""
 options(warn = -1)  # Suppress warnings
@@ -35,4 +37,4 @@ suppressMessages({
 options(warn = 0)  # Restore warnings
 """
 
-println("All required Julia and R packages have been installed.")
+println("R dependencies installed.")

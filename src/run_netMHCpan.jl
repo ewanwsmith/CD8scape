@@ -27,7 +27,7 @@ function get_netMHCpan_path()
         line = strip(line)
         if !isempty(line) && !startswith(line, "#")
             path = replace(line, r"['\"]" => "") |> normpath
-            println("DEBUG: netMHCpan path -> ", path)
+            println("Failed to parse path to netMHCpan installation : netMHCpan path -> ", path)
 
             if isdir(path)
                 return path  # Return immediately if valid
@@ -51,9 +51,9 @@ function main()
     netMHCpan_path = get_netMHCpan_path()
 
     # Change to the netMHCpan directory
-    println("DEBUG: Changing directory to -> ", netMHCpan_path)
+    println("Changing directory to -> ", netMHCpan_path)
     cd(netMHCpan_path)
-    println("DEBUG: Current working directory -> ", pwd())
+    println("Current working directory -> ", pwd())
 
     # Paths to required files
     alleles_file = joinpath(folder_path, "alleles.txt")
