@@ -8,7 +8,7 @@ using FilePathsBase
     parse_trajectories(trajectories_file)
 
 Parse the `.out` file, discover all unique time points, build columns for 
-each time point, and return a DataFrame. No separate `Times.in` file is needed.
+each time point, and return a DataFrame.
 """
 function parse_trajectories(trajectories_file)
     # Storage for raw data (one Dict per "locus" line in .out)
@@ -53,10 +53,8 @@ function parse_trajectories(trajectories_file)
                 count_t      = parse(Int, data_tokens[idx]);   idx += 1
                 total_reads  = parse(Int, data_tokens[idx]);   idx += 1
 
-                # Record this time in our set of unique time points
                 push!(unique_times, time)
 
-                # Store counts in the row_dict for this time
                 row_dict[Symbol("Count_A_t$time")]     = count_a
                 row_dict[Symbol("Count_C_t$time")]     = count_c
                 row_dict[Symbol("Count_G_t$time")]     = count_g
@@ -88,17 +86,13 @@ function parse_trajectories(trajectories_file)
 
     # Populate the DataFrame row by row
     for row_dict in data_storage
-        # Construct a row vector, ensuring every column is filled
-        # Default 0 for missing timepoint columns
         row_values = Vector{Any}(undef, length(columns))
         for (i, col) in pairs(columns)
             if haskey(row_dict, col)
                 row_values[i] = row_dict[col]
             elseif col in (:Locus, :Consensus, :Variant)
-                # Must exist in the row
                 row_values[i] = row_dict[col]
             else
-                # For time-based columns that don't exist, default to 0
                 row_values[i] = 0
             end
         end
@@ -109,7 +103,6 @@ function parse_trajectories(trajectories_file)
 end
 
 function main()
-    # Check that a folder path was provided
     if length(ARGS) < 1
         println("Usage: julia script.jl <folder_path>")
         return
@@ -121,20 +114,28 @@ function main()
     trajectories_file = joinpath(folder_path, "single_locus_trajectories.out")
 
     if !isfile(trajectories_file)
-        # If that file doesn't exist, look for any .out file in the folder
+        # If that exact file doesn't exist, look for any file starting with single_locus_trajectories
         out_files = filter(f -> endswith(f, ".out"), readdir(folder_path))
-        if isempty(out_files)
-            error("No 'single_locus_trajectories.out' and no other .out files found in $folder_path")
+        slt_files = filter(f -> startswith(f, "single_locus_trajectories") && endswith(f, ".out"), out_files)
+        
+        if !isempty(slt_files)
+            trajectories_file = joinpath(folder_path, slt_files[1])
+            println("No single_locus_trajectories.out found. Using `$(slt_files[1])` instead.")
         else
-            trajectories_file = joinpath(folder_path, out_files[1])
-            println("No single_locus_trajectories.out found. Using `$(out_files[1])` instead.")
+            # If no single_locus_trajectories* files, try any .out file
+            if isempty(out_files)
+                error("No 'single_locus_trajectories.out' and no other .out files found in $folder_path")
+            else
+                trajectories_file = joinpath(folder_path, out_files[1])
+                println("No single_locus_trajectories.out found. Using `$(out_files[1])` instead.")
+            end
         end
     end
 
     # Build output file path
     output_file = joinpath(folder_path, "variants.csv")
 
-    # Parse the trajectories (no need for Times.in anymore)
+    # Parse the trajectories
     trajectories_df = parse_trajectories(trajectories_file)
 
     # Keep only Locus, Consensus, and Variant columns

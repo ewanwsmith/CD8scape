@@ -38,37 +38,37 @@ print_help()
 Prints out usage and help information for this script.
 """
 function print_help()
-    println("Usage: julia script.jl <data_folder>")
+    println("Usage: julia generate_peptides.jl <data_folder>")
     println("")
-    println("This script processes peptide data from frames.csv and trajectories.csv, ")
+    println("This script processes peptide data from frames.csv and variants.csv, ")
     println("found in the specified data_folder directory, and generates two output files:")
     println("  1. peptides_labels.csv: A CSV file containing labeled peptide sequences.")
     println("  2. Peptides.pep: A .pep file containing peptide sequences without headers.")
     println("")
     println("Arguments:")
-    println("  <data_folder>: A directory containing frames.csv and trajectories.csv.")
+    println("  <data_folder>: A directory containing frames.csv and variants.csv.")
     println("")
-    println("For help, run: julia script.jl --help")
+    println("For help, run: generate_peptides.jl --help")
 end
 
 """
     join_data(folder_path::String) :: DataFrame
 
-Reads `frames.csv` and `trajectories.csv` from the specified folder, extracts start and
+Reads `frames.csv` and `variants.csv` from the specified folder, extracts start and
 end positions from the 'Region' column, and filters rows based on locus conditions.
 
 # Arguments
-- folder_path::String: The directory containing frames.csv and trajectories.csv
+- folder_path::String: The directory containing frames.csv and variants.csv
 
 # Returns
 - A DataFrame of joined and filtered data.
 """
 function join_data(folder_path::String)::DataFrame
     frames_path = joinpath(folder_path, "frames.csv")
-    trajectories_path = joinpath(folder_path, "trajectories.csv")
+    variants_path = joinpath(folder_path, "variants.csv")
     
     frames = CSV.read(frames_path, DataFrame)
-    trajectories = CSV.read(trajectories_path, DataFrame)
+    variants = CSV.read(variants_path, DataFrame)
     
     frames[!, :Start] = [
         parse(Int, split(split(region, ";")[1], ",")[1]) for region in frames.Region
@@ -77,8 +77,8 @@ function join_data(folder_path::String)::DataFrame
         parse(Int, split(split(region, ";")[end], ",")[2]) for region in frames.Region
     ]
     
-    # Perform a cross join of trajectories and frames, then filter
-    result = crossjoin(trajectories, frames)
+    # Perform a cross join of variants and frames, then filter
+    result = crossjoin(variants, frames)
     filter!(row -> row.Start ≤ row.Locus ≤ row.End, result)
     
     return result

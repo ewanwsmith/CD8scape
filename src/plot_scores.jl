@@ -1,8 +1,5 @@
 #!/usr/bin/env julia
 
-# Include dependencies and environment setup
-include("env.jl")
-
 using CSV
 using DataFrames
 using RCall

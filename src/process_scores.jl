@@ -1,8 +1,5 @@
 #!/usr/bin/env julia
 
-# Include environment settings
-include("./env.jl")
-
 using DataFrames, CSV
 
 # Manual argument parsing function
@@ -21,7 +18,7 @@ end
 
 # Process and join files
 function process_and_join(folder_path::String)::DataFrame
-    mhcpan_path = joinpath(folder_path, "netMHCPan_output_processed.csv")
+    mhcpan_path = joinpath(folder_path, "processed_output.csv")
     peptides_path = joinpath(folder_path, "peptides_labels.csv")
 
     if !(isfile(mhcpan_path) && isfile(peptides_path))
