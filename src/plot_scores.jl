@@ -58,13 +58,13 @@ redirect_stdout(devnull) do
         options(warn = -1)  # Suppress warnings
 
         # Scatter Plot: EL Rank Comparison
-        rank_scatterplot = ggplot(scores, aes(x = EL_rank_V, y = EL_rank_C, color = as.factor(Locus))) +
+        rank_scatterplot = ggplot(scores, aes(y = EL_rank_V, x = EL_rank_C, color = as.factor(Locus))) +
             geom_point() +
             geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
             labs(
                 title = "EL Ranks by MHC", 
-                x = "Variant EL Rank", 
-                y = "Consensus EL Rank", 
+                y = "Variant EL Rank", 
+                x = "Consensus EL Rank", 
                 color = "Locus"
             ) +
             scale_color_viridis(discrete = TRUE) +
