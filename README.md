@@ -20,5 +20,4 @@ Runs netMHCpan for variants.
     1) Generates consensus and variant peptides of lengths 8, 9, 10, and 11 for each variant locus. This will produce Peptides.pep, which is input to later steps, and peptides_labels.csv, which contains arbitrary labels used to later join consensus-variant peptide pairs. 
     2) Runs netMHCpan's MHC prediction model to generate eluted ligand (EL) scores and associated % ranks for each peptide. This will produce netMHCpan_output.tsv. 
     3) Runs process_output.pl to convert netMHCpan_output.tsv to a more readable processed_output.csv. 
-    4) Joins netMHCpan output for consensus-variant peptide pairs and calculates net scores. Displays the sequence and variant locus of any peptides dropped due to containing stop codons. This will produce net_scores.csv. 
-    4) Plots output with ggplot. This will produce net_scores.jpeg. Note this will get very busy at more than a few alleles or loci, and may not run at all for very many. 
+    4) Joins netMHCpan output for consensus-variant peptide pairs and calculates net scores. Displays the sequence and variant locus of any peptides dropped due to containing stop codons. This will produce net_scores.csv.
