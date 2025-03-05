@@ -109,6 +109,29 @@ function calculate_net_scores(df::DataFrame)::DataFrame
     return df
 end
 
+# Filter out non-binding peptides where EL_rank_C and EL_rank_V are both >2
+function filter_non_binding_peptides(df::DataFrame)::DataFrame
+    grouped_counts = Dict()
+
+    for hla in unique(df.MHC)
+        hla_df = filter(row -> row.MHC == hla, df)
+        total_count = nrow(hla_df)
+        dropped_count = sum((hla_df.EL_rank_C .> 2) .& (hla_df.EL_rank_V .> 2))
+        percent_dropped = total_count > 0 ? round(dropped_count / total_count * 100, digits=2) : 0.0
+
+        if dropped_count > 0
+            grouped_counts[hla] = (dropped_count, percent_dropped)
+        end
+    end
+
+    # Print count and percentage of dropped peptides for each HLA type
+    for (hla, (count, percent)) in grouped_counts
+        println("Dropped $count peptides for $hla ($percent% of total) as non-binding.")
+    end
+
+    return filter(row -> !(row.EL_rank_C > 2 && row.EL_rank_V > 2), df)
+end
+
 # Main function to run the pipeline
 function main()
     args = parse_arguments()
@@ -123,8 +146,11 @@ function main()
     println("Combining rows by Peptide_label and MHC...")
     combined_result_df = combine_rows_by_label_and_mhc(long_result_df)
 
+    println("Filtering out non-binding peptides...")
+    filtered_df = filter_non_binding_peptides(combined_result_df)
+
     println("Calculating net scores...")
-    final_result_df = calculate_net_scores(combined_result_df)
+    final_result_df = calculate_net_scores(filtered_df)
 
     # Save the output to net_scores.csv in the input folder
     output_path = joinpath(folder_path, "net_scores.csv")
