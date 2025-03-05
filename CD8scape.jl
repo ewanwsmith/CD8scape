@@ -191,11 +191,6 @@ elseif command == "run"
         exit(1)
     end
 
-    if !safe_run(`julia --project=. src/plot_scores.jl $folder_path`)
-        println("Error running src/plot_scores.jl")
-        exit(1)
-    end
-
     println("Run stage finished successfully.")
 
 else
