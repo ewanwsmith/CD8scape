@@ -64,7 +64,6 @@ DESCRIPTION:
     - Run NetMHCpan predictions with src/run_netMHCpan.jl
     - Process the resulting NetMHCpan output with src/process_output.pl
     - Process the processed scores with src/process_scores.jl
-    - Plot those scores with src/plot_scores.jl
 
 EXAMPLES:
   # Setting up the environment
