@@ -152,6 +152,10 @@ function main()
     println("Calculating net scores...")
     final_result_df = calculate_net_scores(filtered_df)
 
+    # Sort by Locus before saving
+    println("Sorting by Locus...")
+    sort!(final_result_df, :Locus)
+
     # Save the output to net_scores.csv in the input folder
     output_path = joinpath(folder_path, "net_scores.csv")
     println("Saving results to $output_path...")
