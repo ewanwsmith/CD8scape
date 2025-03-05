@@ -62,7 +62,6 @@ function main()
         open(test_file, "w") do io
             write(io, "test")
         end
-        println("DEBUG: Write test succeeded. Removing test file...")
         rm(test_file)
     catch e
         error("ERROR: Cannot write to output folder. Check permissions!")
@@ -70,24 +69,19 @@ function main()
 
     # Read alleles
     allele_list = open(alleles_file) do file
-        [split(line, r"\s+")[1] for line in readlines(file) if !isempty(line)]
+        [split(line, r"\\s+")[1] for line in readlines(file) if !isempty(line)]
     end
     alleles = join(allele_list, ",")
 
     cmd = `$netMHCpan_path/netMHCpan -p $peptides_file -xls -a $alleles -xlsfile $xlsfile_path`
-    
-    println("DEBUG: Running NetMHCpan with command:")
+    println("Running NetMHCpan with command:")
     println(cmd)
     
     try
         run(cmd)
 
-        println("DEBUG: Searching for .tsv files in output folder...")
-        run(`find $folder_path -name "*.tsv"`)
-
-        println("DEBUG: Checking if output file was created: $xlsfile_path")
         if isfile(xlsfile_path)
-            println("DEBUG: NetMHCpan output found at $xlsfile_path")
+            println("NetMHCpan output found at $xlsfile_path")
         else
             error("ERROR: NetMHCpan did not create the expected output file.")
         end
