@@ -76,7 +76,7 @@ redirect_stdout(devnull) do
             geom_boxplot(outlier.shape = NA) +
             geom_jitter(width = 0.2, size = 1) +
             geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-            ylim(-50, 50) +
+            #ylim(-50, 50) +
             labs(
                 title = "Net EL Rank by MHC", 
                 x = "Locus", 
@@ -97,7 +97,9 @@ redirect_stdout(devnull) do
 
         # Save the combined plot as a JPEG file
         output_path <- file.path(folder_path, "net_scores.jpeg")
-        ggsave(output_path, plot = rank_plots, width = 10, height = 20, units = "in", dpi = 300)
+        ggsave(output_path, plot = rank_plots, 
+         #width = 10, height = 20, units = "in", dpi = 300
+         )
 
         options(warn = 0)  # Restore warning settings
         """
