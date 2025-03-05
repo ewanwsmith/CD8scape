@@ -22,7 +22,7 @@ function process_and_join(folder_path::String)::DataFrame
     peptides_path = joinpath(folder_path, "peptides_labels.csv")
 
     if !(isfile(mhcpan_path) && isfile(peptides_path))
-        error("Required files not found. Ensure both netMHCPan_output_processed.csv and peptides_labels.csv are present in $folder_path.")
+        error("Required files not found. Ensure both processed_output.csv and peptides_labels.csv are present in $folder_path.")
     end
 
     mhcpan_df = CSV.read(mhcpan_path, DataFrame)
@@ -44,23 +44,13 @@ end
 
 # Reshape HLA-related data
 function reshape_hla_data(df::DataFrame)::DataFrame
-    hla_score_columns = filter(col -> occursin(r"_EL-score$", col), names(df))
-    hla_rank_columns = filter(col -> occursin(r"_EL_Rank$", col), names(df))
-    hla_types_score = replace.(hla_score_columns, r"_EL-score$" => "")
-    hla_types_rank = replace.(hla_rank_columns, r"_EL_Rank$" => "")
-    hla_types = intersect(hla_types_score, hla_types_rank)
-
+    hla_types = unique(df.HLA)
     long_df = DataFrame()
 
     for hla in hla_types
-        score_col = Symbol("$hla" * "_EL-score")
-        rank_col = Symbol("$hla" * "_EL_Rank")
-
-        hla_df = select(df, [:Locus, :Peptide, :Peptide_label, :Pos, :ID], copycols=false)
-        hla_df[:, :MHC] = repeat([hla], nrow(hla_df))
-        hla_df[:, :EL_score] = df[!, score_col]
-        hla_df[:, :EL_rank] = df[!, rank_col]
-
+        hla_df = filter(row -> row.HLA == hla, df)
+        hla_df[:, :MHC] = hla_df[:, :HLA]
+        select!(hla_df, Not(:HLA))  # Remove old HLA column
         append!(long_df, hla_df)
     end
 
@@ -87,14 +77,14 @@ function combine_rows_by_label_and_mhc(df::DataFrame)::DataFrame
             v_row = first(filter(row -> startswith(row.Peptide_label, "$label"), v_rows))
 
             combined_row = DataFrame(
-                Locus = [c_row.Locus],
-                Peptide = [c_row.Peptide],
+                Locus = [c_row."Locus"],
+                Peptide = [c_row."Peptide"],
                 Peptide_label = [label],
                 MHC = [mhc],
-                EL_score_C = [c_row.EL_score],
-                EL_score_V = [v_row.EL_score],
-                EL_rank_C = [c_row.EL_rank],
-                EL_rank_V = [v_row.EL_rank]
+                EL_score_C = [c_row."EL-score"],
+                EL_score_V = [v_row."EL-score"],
+                EL_rank_C = [c_row."EL_Rank"],
+                EL_rank_V = [v_row."EL_Rank"]
             )
 
             append!(combined_df, combined_row)
