@@ -15,7 +15,9 @@ packages = [
     "CSV",
     "FilePathsBase",
     "ArgParse",
-    "CodecZlib"
+    "CodecZlib",
+    "Statistics",
+    "StatsBase",
 ]
 
 # Add remaining Julia packages without output

@@ -13,9 +13,6 @@ This script:
 6) Saves a single `frames.csv` with columns: Region, Consensus_sequence, Description.
 """
 
-# Include environment settings (comment out if not needed)
-include("./env.jl")
-
 using DataFrames
 using CSV
 using FilePathsBase
