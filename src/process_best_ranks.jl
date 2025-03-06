@@ -64,11 +64,17 @@ if !isempty(best_ranks)
         end
     end
 
+    # **Filter out loci where both HMBR_C and HMBR_V are greater than 2**
+    before_filter = nrow(pivot_df)
+    pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
+    removed_count = before_filter - nrow(pivot_df)
+    println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
+
     # Calculate fold change (Derived (_V) / Ancestral (_C))
     pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
 
     # Save harmonic mean results with fold change
-    harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv")
+    harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv") 
     CSV.write(harmonic_mean_file, pivot_df)
     println("Saved harmonic mean best ranks with fold change to $harmonic_mean_file")
 else
