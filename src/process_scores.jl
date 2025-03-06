@@ -32,8 +32,15 @@ function process_and_join(folder_path::String)::DataFrame
     dropped_rows = joined_df[ismissing.(joined_df.Pos), :]
 
     if "Locus" in names(dropped_rows)
-        println("Dropped rows (Peptide and Locus):")
-        println(dropped_rows[:, [:Peptide, :Locus]])
+        grouped_dropped = combine(groupby(dropped_rows, :Locus), nrow => :Dropped_Count)
+        total_per_locus = combine(groupby(joined_df, :Locus), nrow => :Total_Count)
+
+        stats = leftjoin(grouped_dropped, total_per_locus, on=:Locus)
+        stats[:, :Percentage] = round.((stats.Dropped_Count ./ stats.Total_Count) .* 100, digits=2)
+
+        for row in eachrow(stats)
+            println("$(row.Dropped_Count) peptides dropped from locus $(row.Locus) due to stop codon(s) in the peptide ($(row.Percentage)% of total for locus $(row.Locus))")
+        end
     else
         println("Column 'Locus' not found in dropped rows.")
     end
