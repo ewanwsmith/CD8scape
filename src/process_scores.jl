@@ -30,7 +30,6 @@ function process_and_join(folder_path::String)::DataFrame
 
     joined_df = leftjoin(peptides_df, mhcpan_df, on="Peptide")
     dropped_rows = joined_df[ismissing.(joined_df.Pos), :]
-    select!(joined_df, Not(:Pos))  # Drop the 'Pos' column
 
     if "Locus" in names(dropped_rows)
         println("Dropped rows (Peptide and Locus):")
