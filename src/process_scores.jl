@@ -56,12 +56,15 @@ function main()
     joined_df = process_and_join(folder_path)
     reshaped_df = reshape_hla_data(joined_df)
 
+    # Drop rows where MHC is missing
+    filtered_df = filter(row -> !ismissing(row.MHC), reshaped_df)
+
     println("Sorting by Locus...")
-    sort!(reshaped_df, :Locus)
+    sort!(filtered_df, :Locus)
 
     output_path = joinpath(folder_path, "processed_peptides.csv")
     println("Saving results to $output_path...")
-    CSV.write(output_path, reshaped_df)
+    CSV.write(output_path, filtered_df)
 
     println("Processing completed successfully!")
 end
