@@ -30,7 +30,6 @@ function process_and_join(folder_path::String)::DataFrame
 
     joined_df = leftjoin(peptides_df, mhcpan_df, on="Peptide")
     dropped_rows = joined_df[ismissing.(joined_df.Pos), :]
-    joined_df = dropmissing(joined_df, :Pos)
     select!(joined_df, Not(:Pos))  # Drop the 'Pos' column
 
     if "Locus" in names(dropped_rows)
@@ -55,17 +54,12 @@ function main()
     args = parse_arguments()
     folder_path = args["folder"]
 
-    println("Processing and joining files...")
-    result_df = process_and_join(folder_path)
+    joined_df = process_and_join(folder_path)
+    reshaped_df = reshape_hla_data(joined_df)
 
-    println("Reshaping HLA-related data...")
-    reshaped_df = reshape_hla_data(result_df)
-
-    # Sort by Locus before saving
     println("Sorting by Locus...")
     sort!(reshaped_df, :Locus)
 
-    # Save the output to filtered_peptides.csv in the input folder
     output_path = joinpath(folder_path, "processed_peptides.csv")
     println("Saving results to $output_path...")
     CSV.write(output_path, reshaped_df)
