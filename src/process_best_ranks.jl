@@ -64,7 +64,7 @@ if !isempty(best_ranks)
         end
     end
 
-    # **Filter out loci where both HMBR_C and HMBR_V are greater than 2**
+    # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
     before_filter = nrow(pivot_df)
     pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
     removed_count = before_filter - nrow(pivot_df)
