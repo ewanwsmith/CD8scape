@@ -102,7 +102,7 @@ function main()
     dat_filepath = joinpath(folder_path, "Reading_Frames.dat")
 
     if !isfile(dat_filepath)
-        println("The file 'Reading_Frames.dat' was not found in '$folder_path'. Searching for 'sequences.fa instead.")
+        println("The file 'Reading_Frames.dat' was not found in '$folder_path'. Searching for 'sequences.fa' instead.")
         return  # Exits the function without erroring out
     end
 
