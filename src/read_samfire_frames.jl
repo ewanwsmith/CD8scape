@@ -95,7 +95,7 @@ end
 function main()
     if length(ARGS) < 1
         println("Usage: julia script_name.jl <folder_path>")
-        return
+        exit(1)
     end
 
     folder_path = ARGS[1]
@@ -103,7 +103,7 @@ function main()
 
     if !isfile(dat_filepath)
         @error "The file 'Reading_Frames.dat' was not found in '$folder_path'."
-        return
+        exit(1)  # Ensure failure exit status
     end
 
     frames_df = read_dat_file(dat_filepath)
