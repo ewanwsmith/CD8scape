@@ -74,9 +74,9 @@ function read_dat_file(filepath::String)::DataFrame
     end
 
     frames_df = DataFrame(
-        Region            = regions,
+        Region             = regions,
         Consensus_sequence = consensus,
-        Description       = descriptions
+        Description        = descriptions
     )
 
     return frames_df
@@ -102,8 +102,8 @@ function main()
     dat_filepath = joinpath(folder_path, "Reading_Frames.dat")
 
     if !isfile(dat_filepath)
-        @error "The file 'Reading_Frames.dat' was not found in '$folder_path'."
-        exit(1)  # Ensure failure exit status
+        println("The file 'Reading_Frames.dat' was not found in '$folder_path'. Searching for 'sequences.fa' instead.")
+        return  # Exits the function without erroring out
     end
 
     frames_df = read_dat_file(dat_filepath)
