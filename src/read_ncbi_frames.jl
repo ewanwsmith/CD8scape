@@ -6,7 +6,7 @@ Usage:
 
 This script:
 1) Finds sequences.(fa|fasta) for "reference reading frames".
-2) Finds Consensus0.(fa|fasta) for the "consensus sequence".
+2) Finds consensus.(fa|fasta) for the "consensus sequence".
 3) Parses each header in sequences-file for Region & Description.
 4) Reads the entire sequence from the consensus-file.
 5) Extracts each Region's subsequence from the consensus, storing it as `Consensus_sequence`.
@@ -110,7 +110,7 @@ function read_fasta_metadata(file_path::String)::DataFrame
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Reads a single-sequence FASTA file (like `Consensus0.fa`), returning the
+# Reads a single-sequence FASTA file (like `Consensus.fa`), returning the
 # entire consensus as a single string.
 function read_fasta_sequence(file_path::String)::String
     seq = ""
@@ -171,14 +171,14 @@ function main()
     end
     sequences_fa = possible_paths_seq[idx_seq]
 
-    # Attempt to find Consensus0.(fa|fasta)
+    # Attempt to find .consensus(fa|fasta)
     possible_paths_cons = [
-        joinpath(folder_path, "Consensus0.fa"),
-        joinpath(folder_path, "Consensus0.fasta")
+        joinpath(folder_path, "consensus.fa"),
+        joinpath(folder_path, "consensus.fasta")
     ]
     idx_cons = findfirst(isfile, possible_paths_cons)
     if idx_cons === nothing
-        error("No Consensus0.fa or Consensus0.fasta file found in $folder_path")
+        error("No consensus.fa or consensus.fasta file found in $folder_path")
     end
     consensus_fa = possible_paths_cons[idx_cons]
 
@@ -188,7 +188,7 @@ function main()
     # 1) Parse "sequences" headers → DataFrame(Region, Description)
     df = read_fasta_metadata(sequences_fa)
     
-    # 2) Read entire consensus sequence from "Consensus0"
+    # 2) Read entire consensus sequence from "consensus"
     consensus_seq = read_fasta_sequence(consensus_fa)
 
     # 3) For each row, extract the corresponding subsequence from the consensus
