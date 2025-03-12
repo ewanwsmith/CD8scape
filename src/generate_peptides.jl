@@ -55,13 +55,14 @@ end
     join_data(folder_path::String) :: DataFrame
 
 Reads `frames.csv` and `variants.csv` from the specified folder, extracts start and
-end positions from the 'Region' column, and filters rows based on locus conditions.
+end positions from the 'Region' column, and performs a cross join followed by filtering
+to keep only rows where the variant locus is within the frame.
 
 # Arguments
 - folder_path::String: The directory containing frames.csv and variants.csv
 
 # Returns
-- A DataFrame of joined and filtered data.
+- A DataFrame of joined data.
 """
 function join_data(folder_path::String)::DataFrame
     frames_path = joinpath(folder_path, "frames.csv")
@@ -77,7 +78,7 @@ function join_data(folder_path::String)::DataFrame
         parse(Int, split(split(region, ";")[end], ",")[2]) for region in frames.Region
     ]
     
-    # Perform a cross join of variants and frames, then filter
+    # Cross join variants and frames, then keep rows where the locus falls within the frame.
     result = crossjoin(variants, frames)
     filter!(row -> row.Start ≤ row.Locus ≤ row.End, result)
     
@@ -87,15 +88,14 @@ end
 """
     check_locus(df::DataFrame) :: DataFrame
 
-Calculates the relative locus, extracts the pulled base from the consensus sequence,
-checks for consensus matches, and filters the DataFrame to only include rows where
-the variant matches the consensus at that position.
+Calculates the relative locus and extracts the pulled base from the consensus sequence.
+Removed filtering on consensus match so that all rows are retained here.
 
 # Arguments
 - df::DataFrame: The input DataFrame after join_data.
 
 # Returns
-- A DataFrame filtered to only include rows that match the consensus.
+- The same DataFrame with added Relative_Locus, Pulled_Base, and Matches_Consensus columns.
 """
 function check_locus(df::DataFrame)::DataFrame
     df[!, :Relative_Locus] = df.Locus .- df.Start
@@ -106,7 +106,6 @@ function check_locus(df::DataFrame)::DataFrame
     ]
     
     df[!, :Matches_Consensus] = coalesce.(df.Pulled_Base .== df.Consensus, false)
-    filter!(:Matches_Consensus => identity, df)
     return df
 end
 
@@ -258,8 +257,9 @@ end
     separate_peptides(df::DataFrame) :: DataFrame
 
 Splits the flattened DataFrame into two rows per original row: one for the consensus
-peptide and one for the variant peptide, if they differ.
+peptide and one for the variant peptide.
 
+Only non-synonymous variants (where consensus and variant peptides differ) are retained.
 # Arguments
 - df::DataFrame: Input DataFrame after add_peptides_columns!.
 
@@ -267,8 +267,9 @@ peptide and one for the variant peptide, if they differ.
 - A DataFrame with separate rows for consensus and variant peptides.
 """
 function separate_peptides(df::DataFrame)::DataFrame
+    # Retain only rows where the consensus peptide and variant peptide differ.
     filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide, df)
-
+    
     transformed_df = DataFrame(
         Locus = Int[],
         Peptide = String[],
