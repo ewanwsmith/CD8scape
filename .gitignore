@@ -22,3 +22,6 @@ docs/site/
 # committed for packages, but should be committed for applications that require a static
 # environment.
 Manifest.toml
+
+# settings,txt, a file that should be edited to point to the user's local installattion of netMHCpan
+src/settings.txt
