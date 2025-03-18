@@ -30,7 +30,7 @@ OPTIONS:
 """)
 end
 
-# Helper function to run commands safely and handle errors
+# Helper function to run commands safely
 function safe_run(cmd::Cmd)
     try
         run(cmd)
@@ -81,8 +81,14 @@ elseif command == "read"
         end
     end
 
-    samfire_success = safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
-    if !samfire_success
+    safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
+
+    # Check if frames.csv was created
+    frames_csv_path = joinpath(folder_path, "frames.csv")
+    if isfile(frames_csv_path)
+        println("frames.csv successfully created by read_samfire_frames.jl")
+    else
+        println("frames.csv missing after read_samfire_frames.jl. Running read_ncbi_frames.jl instead.")
         ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
         if !ncbi_success
             println("Error: Both frame-reading methods failed.")
