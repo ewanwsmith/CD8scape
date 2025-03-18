@@ -20,4 +20,5 @@ Runs netMHCpan for variants.
     1) Generates consensus and variant peptides of lengths 8, 9, 10, and 11 for each variant locus. This will produce Peptides.pep, which is input to later steps, and peptides_labels.csv, which contains arbitrary labels used to later join consensus-variant peptide pairs. 
     2) Runs netMHCpan's MHC prediction model to generate eluted ligand (EL) scores and associated % ranks for each peptide. This will produce netMHCpan_output.tsv. 
     3) Runs process_output.pl to convert netMHCpan_output.tsv to a more readable processed_output.csv. 
-    4) Joins netMHCpan output for consensus-variant peptide pairs and calculates net scores. Displays the sequence and variant locus of any peptides dropped due to containing stop codons. This will produce net_scores.csv.
+    4) Finds the best rank for each provided HLA type and saves these as best_ranks.csv
+    5) Calculates the harmonic mean best rank for each locus across loci for both ancestral and derived states, and then calculates the fold change between these so that a fold change of >1 represents a predicted weakning of presentation. 
