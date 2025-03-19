@@ -319,6 +319,48 @@ function write_peptides_file_no_headers(df::DataFrame, folder_path::String)
     println("Peptides.pep file has been written to: $file_path")
 end
 
+function generate_background_peptides(aa_sequence::String, region::String)
+    peptide_lengths = [8, 9, 10, 11]
+    peptides = String[]
+    labels = String[]
+
+    # Handle multiple region entries (e.g., "13468,13502;13600,13650")
+    region_parts = split(region, ";")  # ["13468,13502", "13600,13650"]
+
+    start_nt, _ = parse.(Int, split(region_parts[1], ","))  # First pair
+    _, end_nt = parse.(Int, split(region_parts[end], ","))  # Last pair
+
+    for len in peptide_lengths
+        for i in 1:(length(aa_sequence) - len + 1)
+            peptide = aa_sequence[i:(i+len-1)]
+            
+            # Compute the nucleotide loci for this peptide
+            peptide_start_nt = start_nt + (i - 1) * 3
+            peptide_end_nt = start_nt + (i + len - 2) * 3
+
+            push!(peptides, peptide)
+            push!(labels, "$(peptide_start_nt)-$(peptide_end_nt)_A")
+        end
+    end
+
+    return peptides, labels
+end
+
+function create_background_peptide_dataframe(frames::DataFrame)
+    peptide_list = String[]
+    label_list = String[]
+
+    for row in eachrow(frames)
+        if !ismissing(row.Consensus_AA_sequence) && row.Consensus_AA_sequence != "missing"
+            peptides, labels = generate_background_peptides(row.Consensus_AA_sequence, String(row.Region))
+            append!(peptide_list, peptides)
+            append!(label_list, labels)
+        end
+    end
+
+    return DataFrame(Peptide = peptide_list, Peptide_label = label_list)
+end
+
 # ------------------------------------------------------------------------------
 # Main Script
 # ------------------------------------------------------------------------------
@@ -340,7 +382,7 @@ checked = check_locus(joined)
 edited = edit_consensus_sequence(checked)
 translated = translate_sequences(edited)
 
-# Define peptide lengths to generate
+# Define locus-based peptide lengths to generate
 substr_lengths = [8, 9, 10, 11]
 
 flattened_peptides_df = add_peptides_columns!(
@@ -353,10 +395,19 @@ flattened_peptides_df = add_peptides_columns!(
 
 transformed_df = separate_peptides(flattened_peptides_df)
 
+# generate background peptides
+background_peptides_df = create_background_peptide_dataframe(translated)
+
+# Create a new "Locus" column for background_peptides_df with all values set to "A"
+background_peptides_df.Locus .= "A"
+
+# Stack the dataframes vertically
+peptide_df = vcat(transformed_df, background_peptides_df)
+
 # Save to CSV
 csv_file_path = joinpath(data_folder, "peptides_labels.csv")
-CSV.write(csv_file_path, transformed_df)
+CSV.write(csv_file_path, peptide_df)
 println("peptides_labels.csv file has been written to: $csv_file_path")
 
 # Save peptides to .pep file
-write_peptides_file_no_headers(transformed_df, data_folder)
+write_peptides_file_no_headers(peptide_df, data_folder)
