@@ -109,25 +109,31 @@ elseif command == "run"
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
 
-    # Step 1: Generate Peptides
+    # Generate Peptides
     if !safe_run(`julia --project=. src/generate_peptides.jl $folder_path`)
         println("Error running src/generate_peptides.jl")
         exit(1)
     end
 
-    # Step 2: Run NetMHCpan
+    # Clean Peptides
+    if !safe_run(`julia --project=. src/clean_peptides.jl $folder_path`)
+        println("Error running src/clean_peptides.jl")
+        exit(1)
+    end
+
+    # Run NetMHCpan
     if !safe_run(`julia --project=. src/run_netMHCpan.jl --folder $folder_path`)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
     end
 
-    # Step 3: Verify NetMHCpan Output
+    # Verify NetMHCpan Output
     if !isfile(netmhcpan_output)
         println("Error: Expected NetMHCpan output file '$netmhcpan_output' does not exist.")
         exit(1)
     end
 
-    # Step 4: Process Output with Perl Script
+    # Process Output with Perl Script
     try
         perl_output = read(`perl src/process_output.pl $netmhcpan_output`, String)
         open(processed_output, "w") do f
@@ -138,13 +144,13 @@ elseif command == "run"
         exit(1)
     end
 
-    # Step 5: Process Scores
+    # Process Scores
     if !safe_run(`julia --project=. src/process_scores.jl --folder $folder_path`)
         println("Error running src/process_scores.jl")
         exit(1)
     end
 
-    # Step 6: Process Best Ranks
+    # Process Best Ranks
     if !safe_run(`julia --project=. src/process_best_ranks.jl $folder_path`)
         println("Error running src/process_best_ranks.jl")
         exit(1)
