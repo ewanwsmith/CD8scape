@@ -1,18 +1,17 @@
 #!/usr/bin/env julia
 
 using DataFrames, CSV
-using ArgParse
-
-# Parse command-line arguments
-function parse_args()
-    parser = ArgParse.ArgumentParser()
-    @add_argument parser "--folder" "-f" help="Path to the folder containing the processed_peptides.csv file" required=true
-    return parse_args(parser)
-end
 
 # Main function to process the file
-function main(args)
-    folder_path = args["folder"]
+function main()
+    # Ensure a folder path is provided as the first argument
+    if length(ARGS) < 1
+        println("Error: No folder path provided.")
+        println("Usage: julia process_background_peptides.jl <folder_path>")
+        return
+    end
+
+    folder_path = ARGS[1]
     input_file_path = joinpath(folder_path, "processed_peptides.csv")
 
     # Check if the file exists
@@ -79,5 +78,4 @@ function main(args)
 end
 
 # Run the script
-args = parse_args()
-main(args)
+main()
