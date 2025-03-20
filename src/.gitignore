@@ -30,4 +30,4 @@ Manifest.toml
 src/settings.txt
 
 # /data/ directory, which contains the example data
-../data/*
+./data/*
