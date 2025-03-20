@@ -31,7 +31,6 @@ const CODON_DICT = Dict(
 # ------------------------------------------------------------------------------
 # Function Definitions
 # ------------------------------------------------------------------------------
-
 """
 print_help()
 
@@ -216,8 +215,10 @@ function add_peptides_columns!(
     variant_col::Symbol, 
     substr_lengths::Vector{Int}
 )::DataFrame
+    # Calculate AA_Locus from Relative_Locus
     df[!, :AA_Locus] = ceil.(Int, df[!, relative_locus_col] / 3) .+ 1
     
+    # Initialize the output DataFrame
     flattened_peptides_df = DataFrame(
         Locus = Int[],
         Relative_Locus = Int[],
@@ -227,14 +228,19 @@ function add_peptides_columns!(
         Peptide_label = String[]
     )
     
+    # Iterate through each row of the DataFrame
     for row in eachrow(df)
+        # Generate the consensus and variant peptides
         consensus_peptides = generate_peptides(row[consensus_col], row.AA_Locus, substr_lengths)
         variant_peptides = generate_peptides(row[variant_col], row.AA_Locus, substr_lengths)
         
         if length(consensus_peptides) == length(variant_peptides)
             counter = 1
             for (cons_pep, var_pep) in zip(consensus_peptides, variant_peptides)
-                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)_$counter"
+                # Replace spaces with underscores in Description
+                description_with_underscores = replace(row.Description, " " => "_")
+                # Include the ORF information (with underscores) in the label
+                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)_$(description_with_underscores)_$counter"
                 push!(flattened_peptides_df, (
                     row.Locus, 
                     row.Relative_Locus, 
@@ -260,6 +266,7 @@ Splits the flattened DataFrame into two rows per original row: one for the conse
 peptide and one for the variant peptide.
 
 Only non-synonymous variants (where consensus and variant peptides differ) are retained.
+
 # Arguments
 - df::DataFrame: Input DataFrame after add_peptides_columns!.
 
@@ -293,6 +300,82 @@ function separate_peptides(df::DataFrame)::DataFrame
     end
 
     return transformed_df
+end
+
+# ------------------------------------------------------------------------------
+# Background peptide generation functions
+# ------------------------------------------------------------------------------
+"""
+    generate_background_peptides(aa_sequence::String, region::String, description::String)
+
+Generates background peptide sequences for the consensus amino acid sequence based on region and description.
+
+# Arguments
+- aa_sequence::String: The amino acid sequence.
+- region::String: The nucleotide region in "start,end" format or "start1,end1;start2,end2".
+- description::String: The description to include in the label.
+
+# Returns
+- A tuple of peptide sequences and corresponding labels.
+"""
+function generate_background_peptides(aa_sequence::String, region::String, description::String)
+    peptide_lengths = [8, 9, 10, 11]
+    peptides = String[]
+    labels = String[]
+
+    # Handle multiple region entries (e.g., "13468,13502;13600,13650")
+    region_parts = split(region, ";")  # ["13468,13502", "13600,13650"]
+
+    start_nt, _ = parse.(Int, split(region_parts[1], ","))  # First pair
+    _, end_nt = parse.(Int, split(region_parts[end], ","))  # Last pair
+
+    # Replace spaces with underscores in Description
+    description_clean = replace(description, " " => "_")
+
+    for len in peptide_lengths
+        for i in 1:(length(aa_sequence) - len + 1)
+            peptide = aa_sequence[i:(i+len-1)]
+            
+            # Compute the nucleotide loci for this peptide
+            peptide_start_nt = start_nt + (i - 1) * 3
+            peptide_end_nt = start_nt + (i + len - 2) * 3
+
+            push!(peptides, peptide)
+            
+            # Create label, incorporating ORF information (Description) with underscores
+            label = "$(peptide_start_nt)-$(peptide_end_nt)_$(description_clean)_A"
+            push!(labels, label)
+        end
+    end
+
+    return peptides, labels
+end
+
+"""
+    create_background_peptide_dataframe(frames::DataFrame)
+
+Creates a DataFrame for background peptides using the provided frames DataFrame.
+
+# Arguments
+- frames::DataFrame: The input frames DataFrame containing amino acid sequences.
+
+# Returns
+- A DataFrame containing background peptides and their labels.
+"""
+function create_background_peptide_dataframe(frames::DataFrame)
+    peptide_list = String[]
+    label_list = String[]
+
+    for row in eachrow(frames)
+        if !ismissing(row.Consensus_AA_sequence) && row.Consensus_AA_sequence != "missing"
+            # Pass Description along with other data to generate_background_peptides
+            peptides, labels = generate_background_peptides(row.Consensus_AA_sequence, String(row.Region), String(row.Description))
+            append!(peptide_list, peptides)
+            append!(label_list, labels)
+        end
+    end
+
+    return DataFrame(Peptide = peptide_list, Peptide_label = label_list)
 end
 
 """
@@ -340,7 +423,7 @@ checked = check_locus(joined)
 edited = edit_consensus_sequence(checked)
 translated = translate_sequences(edited)
 
-# Define peptide lengths to generate
+# Define locus-based peptide lengths to generate
 substr_lengths = [8, 9, 10, 11]
 
 flattened_peptides_df = add_peptides_columns!(
@@ -353,10 +436,19 @@ flattened_peptides_df = add_peptides_columns!(
 
 transformed_df = separate_peptides(flattened_peptides_df)
 
+# generate background peptides
+background_peptides_df = create_background_peptide_dataframe(translated)
+
+# Create a new "Locus" column for background_peptides_df with all values set to "A"
+background_peptides_df.Locus .= "A"
+
+# Stack the dataframes vertically
+peptide_df = vcat(transformed_df, background_peptides_df)
+
 # Save to CSV
 csv_file_path = joinpath(data_folder, "peptides_labels.csv")
-CSV.write(csv_file_path, transformed_df)
+CSV.write(csv_file_path, peptide_df)
 println("peptides_labels.csv file has been written to: $csv_file_path")
 
 # Save peptides to .pep file
-write_peptides_file_no_headers(transformed_df, data_folder)
+write_peptides_file_no_headers(peptide_df, data_folder)
