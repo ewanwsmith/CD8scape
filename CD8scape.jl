@@ -156,6 +156,12 @@ elseif command == "run"
         exit(1)
     end
 
+    # Process background peptides
+    if !safe_run(`julia --project=. src/process_background_peptides.jl $folder_path`)
+        println("Error running src/process_background_peptides.jl")
+        exit(1)
+    end
+
     println("Run stage finished successfully.")
 
 else
