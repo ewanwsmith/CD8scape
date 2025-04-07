@@ -208,55 +208,26 @@ the data into a new DataFrame with corresponding annotations.
 # Returns
 - A flattened DataFrame with columns for consensus peptides, variant peptides, and labels.
 """
-function add_peptides_columns!(
-    df::DataFrame, 
-    relative_locus_col::Symbol, 
-    consensus_col::Symbol, 
-    variant_col::Symbol, 
-    substr_lengths::Vector{Int}
-)::DataFrame
-    # Calculate AA_Locus from Relative_Locus
-    df[!, :AA_Locus] = ceil.(Int, df[!, relative_locus_col] / 3) .+ 1
-    
-    # Initialize the output DataFrame
-    flattened_peptides_df = DataFrame(
-        Locus = Int[],
-        Relative_Locus = Int[],
-        AA_Locus = Int[],
-        Consensus_Peptide = String[],
-        Variant_Peptide = String[],
-        Peptide_label = String[]
-    )
-    
-    # Iterate through each row of the DataFrame
+function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol, lens::Vector{Int})::DataFrame
+    df[!, :AA_Locus] = ceil.(Int, df[!, rl] ./ 3) .+ 1
+    out = DataFrame(Locus=Int[], Relative_Locus=Int[], AA_Locus=Int[], Consensus_Peptide=String[], Variant_Peptide=String[], Peptide_label=String[])
     for row in eachrow(df)
-        # Generate the consensus and variant peptides
-        consensus_peptides = generate_peptides(row[consensus_col], row.AA_Locus, substr_lengths)
-        variant_peptides = generate_peptides(row[variant_col], row.AA_Locus, substr_lengths)
-        
-        if length(consensus_peptides) == length(variant_peptides)
-            counter = 1
-            for (cons_pep, var_pep) in zip(consensus_peptides, variant_peptides)
-                # Replace spaces with underscores in Description
-                description_with_underscores = replace(row.Description, " " => "_")
-                # Include the ORF information (with underscores) in the label
-                peptide_label = "$(row.Consensus)$(row.Locus)$(row.Variant)_$(description_with_underscores)_$counter"
-                push!(flattened_peptides_df, (
-                    row.Locus, 
-                    row.Relative_Locus, 
-                    row.AA_Locus,
-                    cons_pep, 
-                    var_pep, 
-                    peptide_label
-                ))
-                counter += 1
+        cps = generate_peptides(row[cs], row.AA_Locus, lens)
+        vps = generate_peptides(row[vs], row.AA_Locus, lens)
+        if length(cps) == length(vps)
+            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row[cs])) ? row[cs][row.AA_Locus] : "?"
+            variant_aa = (1 ≤ row.AA_Locus ≤ length(row[vs])) ? row[vs][row.AA_Locus] : "?"
+            change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
+            for (i, (c, v)) in enumerate(zip(cps, vps))
+                base = "$(row.Consensus)$(row.Locus)$(row.Variant)_$(replace(String(row.Description), " " => "_"))"
+                label = string(base, "_", change_label, "_", i)
+                push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
             end
         else
-            @warn "Mismatched peptide lists in row with Locus $(row.Locus). Skipping this row."
+            @warn "Mismatched peptide counts at Locus $(row.Locus). Skipping."
         end
     end
-    
-    return flattened_peptides_df
+    return out
 end
 
 """
@@ -363,19 +334,18 @@ Creates a DataFrame for background peptides using the provided frames DataFrame.
 - A DataFrame containing background peptides and their labels.
 """
 function create_background_peptide_dataframe(frames::DataFrame)
-    peptide_list = String[]
-    label_list = String[]
-
+    peps, labels = String[], String[]
     for row in eachrow(frames)
         if !ismissing(row.Consensus_AA_sequence) && row.Consensus_AA_sequence != "missing"
-            # Pass Description along with other data to generate_background_peptides
-            peptides, labels = generate_background_peptides(row.Consensus_AA_sequence, String(row.Region), String(row.Description))
-            append!(peptide_list, peptides)
-            append!(label_list, labels)
+            p, l = generate_background_peptides(
+                String(row.Consensus_AA_sequence),
+                String(row.Region),
+                String(row.Description)
+            )
+            append!(peps, p); append!(labels, l)
         end
     end
-
-    return DataFrame(Peptide = peptide_list, Peptide_label = label_list)
+    return DataFrame(Peptide = peps, Peptide_label = labels, Locus = fill("A", length(peps)))
 end
 
 """
