@@ -120,18 +120,20 @@ Edits the consensus sequence at the relative locus to produce a variant sequence
 - A DataFrame with a new 'Variant_sequence' column.
 """
 function edit_consensus_sequence(df::DataFrame)::DataFrame
-    df[!, :Variant_sequence] = Vector{String}(undef, nrow(df))
-    
+    df[!, :Variant_sequence] = similar(df.Consensus_sequence)
     for row in eachrow(df)
-        if 1 ≤ row.Relative_Locus ≤ length(row.Consensus_sequence)
-            sequence_chars = collect(row.Consensus_sequence)
-            sequence_chars[row.Relative_Locus] = row.Variant[1]
-            row.Variant_sequence = join(sequence_chars)
+        rl = row.Relative_Locus
+        consensus = row.Consensus_sequence
+        variant_nt = row.Variant
+
+        if !ismissing(rl) && 1 ≤ rl ≤ length(consensus)
+            seq = collect(consensus)
+            seq[rl] = variant_nt[1]  # <-- fix is here
+            row.Variant_sequence = join(seq)
         else
-            row.Variant_sequence = row.Consensus_sequence
+            row.Variant_sequence = consensus
         end
     end
-    
     return df
 end
 
@@ -209,24 +211,37 @@ the data into a new DataFrame with corresponding annotations.
 - A flattened DataFrame with columns for consensus peptides, variant peptides, and labels.
 """
 function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol, lens::Vector{Int})::DataFrame
-    df[!, :AA_Locus] = ceil.(Int, df[!, rl] ./ 3) .+ 1
-    out = DataFrame(Locus=Int[], Relative_Locus=Int[], AA_Locus=Int[], Consensus_Peptide=String[], Variant_Peptide=String[], Peptide_label=String[])
+    df[!, :AA_Locus] = floor.(Int, df[!, rl] ./ 3) .+ 1
+
+    out = DataFrame(
+        Locus = Int[],
+        Relative_Locus = Int[],
+        AA_Locus = Int[],
+        Consensus_Peptide = String[],
+        Variant_Peptide = String[],
+        Peptide_label = String[]
+    )
+
     for row in eachrow(df)
         cps = generate_peptides(row[cs], row.AA_Locus, lens)
         vps = generate_peptides(row[vs], row.AA_Locus, lens)
+
         if length(cps) == length(vps)
-            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row[cs])) ? row[cs][row.AA_Locus] : "?"
-            variant_aa = (1 ≤ row.AA_Locus ≤ length(row[vs])) ? row[vs][row.AA_Locus] : "?"
+            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Consensus_AA_sequence)) ? row.Consensus_AA_sequence[row.AA_Locus] : "?"
+            variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Variant_AA_sequence)) ? row.Variant_AA_sequence[row.AA_Locus] : "?"
+
             change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
+            base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
+
             for (i, (c, v)) in enumerate(zip(cps, vps))
-                base = "$(row.Consensus)$(row.Locus)$(row.Variant)_$(replace(String(row.Description), " " => "_"))"
-                label = string(base, "_", change_label, "_", i)
+                label = "$(base)_$(i)"
                 push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
             end
         else
             @warn "Mismatched peptide counts at Locus $(row.Locus). Skipping."
         end
     end
+
     return out
 end
 
