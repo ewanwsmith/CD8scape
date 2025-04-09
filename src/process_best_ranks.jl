@@ -26,9 +26,16 @@ function find_best_ranks(df, pattern)
     subset = filter(row -> endswith(row.Peptide_label, pattern), df)
     if isempty(subset)
         println("Warning: No peptides found for pattern '$pattern'")
-        return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[])
+        return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
     end
-    return combine(groupby(subset, [:Locus, :MHC]), :EL_Rank => minimum => :Best_EL_Rank)
+    grouped = groupby(subset, [:Locus, :MHC])
+    best_rows = combine(grouped) do sdf
+        idx = argmin(sdf.EL_Rank)
+        (; Best_EL_Rank = sdf.EL_Rank[idx],
+           Description = sdf.Peptide_label[idx],
+           Sequence = sdf.Peptide[idx])
+    end
+    return best_rows
 end
 
 # Find best ranks separately for consensus (_C) and variant (_V) peptides
