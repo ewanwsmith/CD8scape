@@ -28,7 +28,9 @@ function process_and_join(folder_path::String)::DataFrame
     mhcpan_df = CSV.read(mhcpan_path, DataFrame)
     peptides_df = CSV.read(peptides_path, DataFrame)
 
-    joined_df = leftjoin(peptides_df, mhcpan_df, on="Peptide")
+    # Perform left join: attach Peptide_label and Locus to mhcpan_df
+    joined_df = leftjoin(mhcpan_df, peptides_df, on="Peptide")
+
     dropped_rows = joined_df[ismissing.(joined_df.Pos), :]
 
     if "Locus" in names(dropped_rows)
