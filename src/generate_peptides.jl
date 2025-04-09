@@ -51,6 +51,33 @@ function print_help()
 end
 
 """
+    generate_peptides(sequence::String, aa_locus::Int, lengths::Vector{Int}) :: Vector{String}
+
+Generates peptide sequences of specified lengths from a given amino acid sequence.
+
+# Arguments
+- sequence::String: The amino acid sequence to generate peptides from.
+- aa_locus::Int: The starting amino acid locus for generating peptides.
+- lengths::Vector{Int}: A vector of peptide lengths to generate.
+
+# Returns
+- A vector of generated peptide sequences.
+"""
+function generate_peptides(sequence::String, aa_locus::Int, lengths::Vector{Int})::Vector{String}
+    peptides = String[]
+    for len in lengths
+        for i in 1:(length(sequence) - len + 1)
+            start_pos = i
+            end_pos = i + len - 1
+            if start_pos ≤ aa_locus ≤ end_pos
+                push!(peptides, sequence[start_pos:end_pos])
+            end
+        end
+    end
+    return peptides
+end
+
+"""
     join_data(folder_path::String) :: DataFrame
 
 Reads `frames.csv` and `variants.csv` from the specified folder, extracts start and
@@ -159,38 +186,6 @@ function translate_sequences(df::DataFrame)::DataFrame
 end
 
 """
-    generate_peptides(sequence::String, locus::Int, substr_lengths::Vector{Int}) :: Vector{String}
-
-Generates all possible peptide substrings of specified lengths that contain the specified locus.
-
-# Arguments
-- sequence::String: The amino acid sequence.
-- locus::Int: Position of interest (1-based index).
-- substr_lengths::Vector{Int}: List of peptide lengths to generate.
-
-# Returns
-- A vector of peptide strings.
-"""
-function generate_peptides(sequence::String, locus::Int, substr_lengths::Vector{Int})::Vector{String}
-    peptides = String[]
-    seq_length = length(sequence)
-    
-    for substr_len in substr_lengths
-        start_min = max(1, locus - substr_len + 1)
-        start_max = min(seq_length - substr_len + 1, locus)
-        
-        for start_pos in start_min:start_max
-            end_pos = start_pos + substr_len - 1
-            if end_pos ≤ seq_length && start_pos ≤ locus ≤ end_pos
-                push!(peptides, sequence[start_pos:end_pos])
-            end
-        end
-    end
-    
-    return peptides
-end
-
-"""
     add_peptides_columns!(df::DataFrame, 
                           relative_locus_col::Symbol, 
                           consensus_col::Symbol, 
@@ -288,80 +283,7 @@ function separate_peptides(df::DataFrame)::DataFrame
     return transformed_df
 end
 
-# ------------------------------------------------------------------------------
-# Background peptide generation functions
-# ------------------------------------------------------------------------------
-"""
-    generate_background_peptides(aa_sequence::String, region::String, description::String)
 
-Generates background peptide sequences for the consensus amino acid sequence based on region and description.
-
-# Arguments
-- aa_sequence::String: The amino acid sequence.
-- region::String: The nucleotide region in "start,end" format or "start1,end1;start2,end2".
-- description::String: The description to include in the label.
-
-# Returns
-- A tuple of peptide sequences and corresponding labels.
-"""
-function generate_background_peptides(aa_sequence::String, region::String, description::String)
-    peptide_lengths = [8, 9, 10, 11]
-    peptides = String[]
-    labels = String[]
-
-    # Handle multiple region entries (e.g., "13468,13502;13600,13650")
-    region_parts = split(region, ";")  # ["13468,13502", "13600,13650"]
-
-    start_nt, _ = parse.(Int, split(region_parts[1], ","))  # First pair
-    _, end_nt = parse.(Int, split(region_parts[end], ","))  # Last pair
-
-    # Replace spaces with underscores in Description
-    description_clean = replace(description, " " => "_")
-
-    for len in peptide_lengths
-        for i in 1:(length(aa_sequence) - len + 1)
-            peptide = aa_sequence[i:(i+len-1)]
-            
-            # Compute the nucleotide loci for this peptide
-            peptide_start_nt = start_nt + (i - 1) * 3
-            peptide_end_nt = start_nt + (i + len - 2) * 3
-
-            push!(peptides, peptide)
-            
-            # Create label, incorporating ORF information (Description) with underscores
-            label = "$(peptide_start_nt)-$(peptide_end_nt)_$(description_clean)_A"
-            push!(labels, label)
-        end
-    end
-
-    return peptides, labels
-end
-
-"""
-    create_background_peptide_dataframe(frames::DataFrame)
-
-Creates a DataFrame for background peptides using the provided frames DataFrame.
-
-# Arguments
-- frames::DataFrame: The input frames DataFrame containing amino acid sequences.
-
-# Returns
-- A DataFrame containing background peptides and their labels.
-"""
-function create_background_peptide_dataframe(frames::DataFrame)
-    peps, labels = String[], String[]
-    for row in eachrow(frames)
-        if !ismissing(row.Consensus_AA_sequence) && row.Consensus_AA_sequence != "missing"
-            p, l = generate_background_peptides(
-                String(row.Consensus_AA_sequence),
-                String(row.Region),
-                String(row.Description)
-            )
-            append!(peps, p); append!(labels, l)
-        end
-    end
-    return DataFrame(Peptide = peps, Peptide_label = labels, Locus = fill("A", length(peps)))
-end
 
 """
     write_peptides_file_no_headers(df::DataFrame, folder_path::String)
@@ -421,14 +343,7 @@ flattened_peptides_df = add_peptides_columns!(
 
 transformed_df = separate_peptides(flattened_peptides_df)
 
-# generate background peptides
-background_peptides_df = create_background_peptide_dataframe(translated)
-
-# Create a new "Locus" column for background_peptides_df with all values set to "A"
-background_peptides_df.Locus .= "A"
-
-# Stack the dataframes vertically
-peptide_df = vcat(transformed_df, background_peptides_df)
+peptide_df = transformed_df
 
 # Save to CSV
 csv_file_path = joinpath(data_folder, "peptides_labels.csv")
