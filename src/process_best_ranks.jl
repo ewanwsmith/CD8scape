@@ -26,9 +26,16 @@ function find_best_ranks(df, pattern)
     subset = filter(row -> endswith(row.Peptide_label, pattern), df)
     if isempty(subset)
         println("Warning: No peptides found for pattern '$pattern'")
-        return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[])
+        return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
     end
-    return combine(groupby(subset, [:Locus, :MHC]), :EL_Rank => minimum => :Best_EL_Rank)
+    grouped = groupby(subset, [:Locus, :MHC])
+    best_rows = combine(grouped) do sdf
+        idx = argmin(sdf.EL_Rank)
+        (; Best_EL_Rank = sdf.EL_Rank[idx],
+           Description = sdf.Peptide_label[idx],
+           Sequence = sdf.Peptide[idx])
+    end
+    return best_rows
 end
 
 # Find best ranks separately for consensus (_C) and variant (_V) peptides
@@ -44,6 +51,40 @@ println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
 
 # Combine consensus and variant results and save as best_ranks.csv
 best_ranks = vcat(best_C, best_V)
+
+# Clean descriptions to remove suffix (e.g., _C, _V, _1, etc.)
+best_ranks.Description = [replace(strip(string(s)), r"_[^_]*$" => "") for s in best_ranks.Description]
+
+# Reorder to put Locus then Description first
+best_ranks = select(best_ranks, :Locus, :Description, Not([:Locus, :Description]))
+
+# Compute shared Description root per Locus
+function shared_prefix(strings)
+    cleaned = [replace(s, r"_([^_]*)$" => "") for s in strings]
+    if isempty(cleaned)
+        return ""
+    end
+    prefix = cleaned[1]
+    for s in cleaned[2:end]
+        minlen = min(length(prefix), length(s))
+        i = 1
+        while i <= minlen && prefix[i] == s[i]
+            i += 1
+        end
+        prefix = prefix[1:i-1]
+        if isempty(prefix)
+            break
+        end
+    end
+    prefix = replace(prefix, r"_$" => "")
+    return prefix
+end
+
+description_roots = combine(groupby(best_ranks, :Locus)) do sdf
+    (; Locus = sdf.Locus[1], Description_Root = shared_prefix(sdf.Description))
+end
+
+# Save best_ranks.csv
 best_ranks_file = joinpath(folder_path, "best_ranks.csv")
 CSV.write(best_ranks_file, best_ranks)
 println("Saved best ranks to $best_ranks_file")
@@ -72,6 +113,12 @@ if !isempty(best_ranks)
 
     # Calculate fold change (Derived (_V) / Ancestral (_C))
     pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+
+    # Compute shared Description root per Locus
+    pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
+
+    # Reorder to put Locus then Description_Root first
+    pivot_df = select(pivot_df, :Locus, :Description_Root, Not([:Locus, :Description_Root]))
 
     # Save harmonic mean results with fold change
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv") 
