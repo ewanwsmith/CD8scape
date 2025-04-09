@@ -54,6 +54,9 @@ function generate_background_peptides(aa_sequence::String, region::String, descr
     for len in peptide_lengths
         for i in 1:(length(aa_sequence) - len + 1)
             peptide = aa_sequence[i:(i+len-1)]
+            if occursin('*', peptide)
+                continue
+            end
             peptide_start_nt = start_nt + (i - 1) * 3
             peptide_end_nt = start_nt + (i + len - 2) * 3
             push!(peptides, peptide)

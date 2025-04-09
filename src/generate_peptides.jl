@@ -256,7 +256,20 @@ Only non-synonymous variants (where consensus and variant peptides differ) are r
 """
 function separate_peptides(df::DataFrame)::DataFrame
     # Retain only rows where the consensus peptide and variant peptide differ.
-    filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide, df)
+    initial_rows = nrow(df)
+    
+    dropped_df = filter(row -> row.Consensus_Peptide == row.Variant_Peptide ||
+                                occursin('*', row.Consensus_Peptide) ||
+                                occursin('*', row.Variant_Peptide), df)
+    removed_loci = length(unique(dropped_df.Locus))
+    
+    filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide &&
+                                !occursin('*', row.Consensus_Peptide) &&
+                                !occursin('*', row.Variant_Peptide), df)
+    
+    final_rows = nrow(filtered_df)
+    removed_rows = initial_rows - final_rows
+    println("Removed $removed_rows peptides from $removed_loci loci due to stop codons.")
     
     transformed_df = DataFrame(
         Locus = Int[],
