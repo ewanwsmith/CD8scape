@@ -4,7 +4,6 @@ Runs netMHCpan for variants.
 # Requirements:
 - perl 5
 - Julia v1.11
-- R v4.4.1
 - [netMHCpan4.1](https://services.healthtech.dtu.dk/services/NetMHCpan-4.1/) installation. A path to this should be added to [settings.txt](src/settings.txt)
 - alleles.txt file present in the directory. This should be a list of the desrired HLA alleles for which to run netMHCpan. Each allele should be on a new line, e.g. 
     HLA-A01:01
