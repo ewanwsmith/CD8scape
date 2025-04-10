@@ -3,14 +3,9 @@ using Pkg
 # Activate the environment in the current directory silently
 Pkg.activate(".", io = devnull)
 
-# Install RCall first, silently
-Pkg.add("RCall"; io = devnull)
-
-# Load RCall after installation
-using RCall
-
-# List of other Julia packages to install silently
-packages = [
+# Ensure that Project.toml exists and includes needed packages
+# Only needed the first time you run the script or when updating dependencies
+required_packages = [
     "DataFrames",
     "CSV",
     "FilePathsBase",
@@ -20,9 +15,15 @@ packages = [
     "StatsBase",
 ]
 
-# Add remaining Julia packages without output
-for pkg in packages
-    Pkg.add(pkg; io = devnull)
+installed = keys(Pkg.dependencies())
+
+for pkg in required_packages
+    if !(pkg in installed)
+        Pkg.add(pkg; io = devnull)
+    end
 end
 
-println("Julia dependencies installed.")
+# Instantiate the environment (fetches deps listed in Project/Manifest.toml)
+Pkg.instantiate(io = devnull)
+
+println("Julia dependencies installed and environment instantiated.")
