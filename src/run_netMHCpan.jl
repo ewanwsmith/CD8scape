@@ -13,8 +13,20 @@ function parse_arguments()
     return args
 end
 
+function find_settings_file()
+    current_dir = pwd()
+    while current_dir != "/"
+        candidate = joinpath(current_dir, "src", "settings.txt")
+        if isfile(candidate)
+            return candidate
+        end
+        current_dir = dirname(current_dir)
+    end
+    error("settings.txt not found in any 'src' directory above current working directory.")
+end
+
 function get_netMHCpan_path()
-    settings_file = "/Users/e.smith.5/Documents/PhD/CD8scape/src/settings.txt"
+    settings_file = find_settings_file()
 
     if !isfile(settings_file)
         error("settings.txt not found at $settings_file. Please provide the file.")
