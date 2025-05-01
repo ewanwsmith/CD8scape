@@ -81,7 +81,7 @@ function main()
 
     # Read alleles
     allele_list = open(alleles_file) do file
-        [split(line, r"\\s+")[1] for line in readlines(file) if !isempty(line)]
+        [replace(split(line, r"\s+")[1], "*" => "") for line in readlines(file) if !isempty(line)]
     end
     alleles = join(allele_list, ",")
 
