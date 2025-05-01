@@ -3,6 +3,8 @@ using Pkg
 # Activate the environment in the current directory silently
 Pkg.activate(".", io = devnull)
 
+import Base.Filesystem: isexecutable
+
 # Ensure that Project.toml exists and includes needed packages
 # Only needed the first time you run the script or when updating dependencies
 required_packages = [
@@ -46,7 +48,7 @@ function check_netmhcpan(path::AbstractString)
     netmhcpan_exec = joinpath(path, "netMHCpan")
     if !isfile(netmhcpan_exec)
         error("netMHCpan executable not found at $netmhcpan_exec")
-    elseif !Sys.isexecutable(netmhcpan_exec)
+    elseif !Base.Filesystem.isexecutable(netmhcpan_exec)
         error("netMHCpan found at $netmhcpan_exec, but it is not executable")
     end
 end
