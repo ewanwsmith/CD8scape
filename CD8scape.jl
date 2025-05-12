@@ -18,11 +18,13 @@ USAGE:
   ./CD8scape.jl prep
   ./CD8scape.jl read <folder_path>
   ./CD8scape.jl run  <folder_path>
+  ./CD8scape.jl run_supertype  <folder_path>
 
 COMMANDS:
   prep    Set up the environment by running src/env.jl.
   read    Attempt to parse trajectories (or VCF) and read frames (SamFire or NCBI).
   run     Run the peptide-generation and NetMHCpan pipeline on parsed data.
+  run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertpe HLA panel.
 
 OPTIONS:
   --help, -h
