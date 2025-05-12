@@ -158,6 +158,66 @@ elseif command == "run"
 
     println("Run stage finished successfully.")
 
+# Process "run_supertype" command
+elseif command == "run_supertype"
+    if length(ARGS) < 2
+        println("Error: Missing folder_path for run_supertype command.")
+        exit(1)
+    end
+
+    folder_path = ARGS[2]
+    netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
+    processed_output = joinpath(folder_path, "processed_output.csv")
+
+    # Generate Peptides
+    if !safe_run(`julia --project=. src/generate_peptides.jl $folder_path`)
+        println("Error running src/generate_peptides.jl")
+        exit(1)
+    end
+
+    # Clean Peptides
+    if !safe_run(`julia --project=. src/clean_peptides.jl $folder_path`)
+        println("Error running src/clean_peptides.jl")
+        exit(1)
+    end
+
+    # Run NetMHCpan
+    if !safe_run(`julia --project=. src/run_netMHCpan_global.jl --folder $folder_path`)
+        println("Error: NetMHCpan did not run successfully.")
+        exit(1)
+    end
+
+    # Verify NetMHCpan Output
+    if !isfile(netmhcpan_output)
+        println("Error: Expected NetMHCpan output file '$netmhcpan_output' does not exist.")
+        exit(1)
+    end
+
+    # Process Output with Perl Script
+    try
+        perl_output = read(`perl src/process_output.pl $netmhcpan_output`, String)
+        open(processed_output, "w") do f
+            write(f, perl_output)
+        end
+    catch e
+        println("Error running src/process_output.pl: $e")
+        exit(1)
+    end
+
+    # Process Scores
+    if !safe_run(`julia --project=. src/process_scores.jl --folder $folder_path`)
+        println("Error running src/process_scores.jl")
+        exit(1)
+    end
+
+    # Process Best Ranks
+    if !safe_run(`julia --project=. src/process_best_ranks.jl $folder_path`)
+        println("Error running src/process_best_ranks.jl")
+        exit(1)
+    end
+
+    println("run_supertype stage finished successfully.")
+
 else
     println("Error: Invalid command '$command'.")
     print_help()
