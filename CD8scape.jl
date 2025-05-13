@@ -83,16 +83,15 @@ elseif command == "read"
         end
     end
 
-    safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
-
-    # Check if frames.csv was created
+    # Try NCBI frame reading first
+    ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
     frames_csv_path = joinpath(folder_path, "frames.csv")
-    if isfile(frames_csv_path)
-        println("frames.csv successfully created by read_samfire_frames.jl")
-    else
-        println("frames.csv missing after read_samfire_frames.jl. Running read_ncbi_frames.jl instead.")
-        ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
-        if !ncbi_success
+
+    if !ncbi_success || !isfile(frames_csv_path)
+        println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
+        samfire_success = safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
+
+        if !samfire_success || !isfile(frames_csv_path)
             println("Error: Both frame-reading methods failed.")
             exit(1)
         end
