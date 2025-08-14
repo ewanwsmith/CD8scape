@@ -1,4 +1,7 @@
+
 #!/usr/bin/env julia
+include("env.jl")
+using CSV, DataFrames
 
 function parse_arguments()
     args = Dict()
@@ -60,13 +63,13 @@ function main()
     function find_representatives_file()
         current_dir = pwd()
         while current_dir != "/"
-            candidate = joinpath(current_dir, "src", "HLA_supertype_representatives.txt")
+            candidate = joinpath(current_dir, "src", "supertype_panel.csv")
             if isfile(candidate)
                 return candidate
             end
             current_dir = dirname(current_dir)
         end
-        error("HLA_supertype_representatives.txt not found in any 'src' directory above current working directory.")
+        error("supertype_panel.csv not found in any 'src' directory above current working directory.")
     end
     representatives_file = find_representatives_file()
     peptides_file = joinpath(folder_path, "Peptides.pep")
@@ -88,10 +91,13 @@ function main()
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
 
-    # Read alleles from the HLA supertype representatives file
-    allele_list = open(representatives_file) do file
-        [replace(split(line, r"\s+")[1], "*" => "") for line in readlines(file) if !isempty(line)]
+    # Read alleles from the supertype_panel.csv file
+    df = CSV.read(representatives_file, DataFrame)
+    df = filter(row -> row.Frequency != 0, df)
+    if !(:Allele in names(df))
+        error("ERROR: Column 'Allele' not found in $(representatives_file).")
     end
+    allele_list = [replace(String(a), "*" => "") for a in collect(skipmissing(df.Allele)) if !isempty(String(a))]
     alleles = join(allele_list, ",")
     cmd = Cmd([joinpath(netMHCpan_path, "netMHCpan"), "-p", peptides_file, "-xls", "-a", alleles, "-xlsfile", xlsfile_path])
     println("Running NetMHCpan with command:")
