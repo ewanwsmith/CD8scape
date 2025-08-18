@@ -34,23 +34,44 @@ println("Julia dependencies installed and environment instantiated.")
 settings_path = joinpath(@__DIR__, "settings.txt")
 
 function get_netmhcpan_path(settings_file::String)
+    # Read NETMHCPAN from settings.txt
+    # Accept either "NETMHCPAN=/full/path/to/netMHCpan" or a single bare line with the path.
+    netmhcpan_path = nothing
     for line in eachline(settings_file)
-        line = strip(line)
-        if isempty(line) || startswith(line, "#")
+        s = strip(line)
+        if isempty(s) || startswith(s, "#")
             continue
         end
-        return line  # Assume the first valid line is the path
+        if occursin('=', s)
+            k, v = strip.(split(s, '=', limit=2))
+            if uppercase(k) == "NETMHCPAN"
+                netmhcpan_path = v
+                break
+            end
+        else
+            # Bare path fallback
+            netmhcpan_path = s
+            break
+        end
     end
-    error("netMHCpan path not found in settings.txt")
+    if netmhcpan_path === nothing
+        error("NETMHCPAN not set in settings.txt. Add a line like: NETMHCPAN=/full/path/to/netMHCpan")
+    end
+    # Expand ~ and make absolute relative to settings file dir if needed
+    netmhcpan_path = replace(netmhcpan_path, "~" => homedir())
+    if !isabspath(netmhcpan_path)
+        netmhcpan_path = abspath(joinpath(dirname(settings_file), netmhcpan_path))
+    end
+    return netmhcpan_path
 end
 
-function check_netmhcpan(path::AbstractString)
-    netmhcpan_exec = joinpath(path, "netMHCpan")
-    if !isfile(netmhcpan_exec)
-        error("netMHCpan executable not found at $netmhcpan_exec")
-    elseif !Base.Filesystem.isexecutable(netmhcpan_exec)
-        error("netMHCpan found at $netmhcpan_exec, but it is not executable")
+function check_netmhcpan(exec_path::AbstractString)
+    if !isfile(exec_path)
+        error("netMHCpan executable not found at $exec_path")
+    elseif !Base.Filesystem.isexecutable(exec_path)
+        error("netMHCpan found at $exec_path, but it is not executable")
     end
+    return exec_path
 end
 
 # Check for Perl installation
@@ -63,8 +84,9 @@ end
 
 try
     netmhcpan_path = get_netmhcpan_path(settings_path)
-    check_netmhcpan(netmhcpan_path)
-    println("netMHCpan executable found and is executable.")
+    netmhcpan_exec = check_netmhcpan(netmhcpan_path)
+    ENV["NETMHCPAN"] = netmhcpan_exec
+    println("netMHCpan executable found and is executable: ", netmhcpan_exec)
 
     check_perl_installed()
     println("Perl installation found.")
