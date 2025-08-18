@@ -25,7 +25,7 @@ function find_settings_file()
     error("settings.txt not found in any 'src' directory above current working directory.")
 end
 
-function get_netMHCpan_path()
+function get_netMHCpan_executable()
     settings_file = find_settings_file()
 
     if !isfile(settings_file)
@@ -35,14 +35,25 @@ function get_netMHCpan_path()
     for line in readlines(settings_file)
         line = strip(line)
         if !isempty(line) && !startswith(line, "#")
-            path = replace(line, r"['\"]" => "") |> normpath
-            println("NetMHCpan path -> ", path)
+            raw = replace(line, r"['\"]" => "") |> normpath
+            println("NetMHCpan path -> ", raw)
 
-            if isdir(path)
-                return path
-            else
-                error("ERROR: Path '$path' does not exist.")
+            # Case 1: settings.txt contains a directory path; expect the executable inside it
+            if isdir(raw)
+                exe = joinpath(raw, "netMHCpan")
+                if isfile(exe)
+                    return exe
+                else
+                    error("ERROR: Directory '$raw' does not contain 'netMHCpan' executable.")
+                end
             end
+
+            # Case 2: settings.txt contains a direct path to the executable
+            if isfile(raw)
+                return raw
+            end
+
+            error("ERROR: Path '$raw' does not exist.")
         end
     end
 
@@ -53,8 +64,8 @@ function main()
     args = parse_arguments()
     folder_path = args["folder"]
 
-    netMHCpan_path = get_netMHCpan_path()
-    println("Using NetMHCpan from: ", netMHCpan_path)
+    netMHCpan_exe = get_netMHCpan_executable()
+    println("Using NetMHCpan executable: ", netMHCpan_exe)
 
     # File paths
     alleles_file = joinpath(folder_path, "alleles.txt")
@@ -85,7 +96,7 @@ function main()
     end
     alleles = join(allele_list, ",")
 
-    cmd = `$netMHCpan_path/netMHCpan -p $peptides_file -xls -a $alleles -xlsfile $xlsfile_path`
+    cmd = `$netMHCpan_exe -p $peptides_file -xls -a $alleles -xlsfile $xlsfile_path`
     println("Running NetMHCpan with command:")
     println(cmd)
     
