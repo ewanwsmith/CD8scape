@@ -21,3 +21,5 @@ Runs netMHCpan for variants.
     3) Runs process_output.pl to convert netMHCpan_output.tsv to a more readable processed_output.csv. 
     4) Finds the best rank for each provided HLA type and saves these as best_ranks.csv
     5) Calculates the harmonic mean best rank for each locus across loci for both ancestral and derived states, and then calculates the fold change between these so that a fold change of >1 represents a predicted weakning of presentation. 
+- ./CD8scape.jl run_supertype $folder_path
+    1 - 5) As for run but uses a representative supertype HLA panel rather than a known HLA genotype.
