@@ -19,12 +19,14 @@ USAGE:
   ./CD8scape.jl read <folder_path>
   ./CD8scape.jl run  <folder_path>
   ./CD8scape.jl run_supertype  <folder_path>
+  ./CD8scape.jl context <folder_path>
 
 COMMANDS:
   prep    Set up the environment by running src/env.jl.
   read    Attempt to parse variants input (samfire trajectories or .vcf) and read frames (SamFire or NCBI).
   run     Run the peptide-generation and NetMHCpan pipeline on parsed data.
   run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertpe HLA panel.
+  context Run the context-sensitive peptide processing pipeline.
 
 OPTIONS:
   --help, -h
@@ -218,6 +220,22 @@ elseif command == "run_supertype"
     end
 
     println("run_supertype stage finished successfully.")
+
+# Process "context" command
+elseif command == "context"
+    if length(ARGS) < 2
+        println("Error: Missing folder_path for context command.")
+        exit(1)
+    end
+
+    folder_path = ARGS[2]
+
+    if !safe_run(`julia --project=. src/context_run/context_run.jl $folder_path`)
+        println("Error running src/context_run/context_run.jl")
+        exit(1)
+    end
+
+    println("Context stage finished successfully.")
 
 else
     println("Error: Invalid command '$command'.")
