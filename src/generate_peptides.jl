@@ -296,7 +296,12 @@ function separate_peptides(df::DataFrame)::DataFrame
     return transformed_df
 end
 
-
+function deduplicate_peptides(df::DataFrame)::DataFrame
+    df[!, :State] = last.(split.(df.Peptide_label, "_"))
+    dedup_df = unique(df, [:Locus, :Peptide, :State])
+    select!(dedup_df, Not(:State))  # remove helper column
+    return dedup_df
+end
 
 """
     write_peptides_file_no_headers(df::DataFrame, folder_path::String)
@@ -355,6 +360,7 @@ flattened_peptides_df = add_peptides_columns!(
 )
 
 transformed_df = separate_peptides(flattened_peptides_df)
+transformed_df = deduplicate_peptides(transformed_df)
 
 peptide_df = transformed_df
 
