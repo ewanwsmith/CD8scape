@@ -12,7 +12,7 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 ## Requirements
 - Perl 5
 - Julia v1.11+
-- `alleles.txt` file listing HLA alleles (one per line, e.g. `HLA-A01:01`)
+- [netMHCpan 4.1](https://services.healthtech.dtu.dk/services/NetMHCpan-4.1/)
 
 ## Installation
 1. Clone the repository:
