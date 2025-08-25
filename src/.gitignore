@@ -30,4 +30,4 @@ Manifest.toml
 .vscode/perl-lang/
 
 # settings,txt, a file that should be edited to point to the user's local installattion of netMHCpan
-#src/settings.txt
+src/settings.txt
