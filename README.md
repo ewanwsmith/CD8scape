@@ -28,6 +28,37 @@ CD8scape is a pipeline for running netMHCpan on genetic variants, supporting bot
    ./CD8scape.jl prep
    ```
 
+## Input Data
+
+CD8scape expects a folder containing the following files:
+
+- **alleles.txt**: List of HLA alleles, one per line (e.g., `HLA-A01:01`).
+- **Variant file**: Either
+  - `single_locus_trajectories.out` (from [Samfire](https://github.com/cjri/samfire)), or
+  - Any `.out` file with Samfire-compatible format, or
+  - `.vcf` or `.vcf.gz` file (standard variant call format).
+- **Reading frame file**: Either
+  - `Reading_Frames.dat` (from [Samfire](https://github.com/cjri/samfire)), or
+  - `sequences.fasta` (reference genome from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)).
+
+### Example: alleles.txt
+```
+HLA-A01:01
+HLA-A02:01
+HLA-B07:02
+HLA-C07:02
+```
+
+### Folder Structure Example
+```
+<your_data_folder>/
+    alleles.txt
+    single_locus_trajectories.out   # or variants.vcf
+    Reading_Frames.dat              # or sequences.fasta
+```
+
+CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. For Samfire, see [Samfire GitHub](https://github.com/cjri/samfire) for details on generating `.out` and `.dat` files.
+
 ## Usage
 All commands are run from the repository root:
 
