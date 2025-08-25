@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+parse_trajectories.jl
+
+Parses Samfire single_locus_trajectories.out file to extract variant information.
+
+Usage:
+    julia parse_trajectories.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing single_locus_trajectories.out.
+"""
 
 using DataFrames
 using CSV

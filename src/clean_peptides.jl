@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+clean_peptides.jl
+
+Removes empty lines, stop codons, and duplicate peptides from input .pep file.
+
+Usage:
+    julia clean_peptides.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing Peptides.pep.
+"""
 
 using CSV
 using DataFrames
@@ -6,7 +17,13 @@ using DataFrames
 # Function to read, filter, and save unique peptides from Peptides.pep
 function process_peptides(folder_path::String)
     # Construct the file path
-    file_path = joinpath(folder_path, "Peptides.pep")
+    files = readdir(folder_path)
+    peptide_file = findfirst(f -> lowercase(f) in ["peptides.pep", "context_peptides.pep"], lowercase.(files))
+    if peptide_file === nothing
+        println("Error: No peptide file (Peptides.pep or context_Peptides.pep) found in folder.")
+        return
+    end
+    file_path = joinpath(folder_path, files[peptide_file])
     
     # Read the Peptides.pep file into a DataFrame
     df = CSV.read(file_path, DataFrame)
@@ -26,7 +43,7 @@ end
 # Command-line argument for folder path
 function main()
     if length(ARGS) != 1
-        println("Usage: julia process_peptides.jl --folder <folder_path>")
+        println("Usage: julia clean_peptides.jl --folder <folder_path>")
         return
     end
     

@@ -223,19 +223,77 @@ elseif command == "run_supertype"
 
 # Process "context" command
 elseif command == "context"
+
     if length(ARGS) < 2
         println("Error: Missing folder_path for context command.")
         exit(1)
     end
 
     folder_path = ARGS[2]
+    remaining_args = ARGS[3:end]
 
-    if !safe_run(`julia --project=. src/context_run/context_run.jl $folder_path`)
-        println("Error running src/context_run/context_run.jl")
-        exit(1)
+    # Check for --force
+    force = any(x -> x == "--force", remaining_args)
+
+    # Output file to check
+    context_output = joinpath(folder_path, "context_scores.csv")
+
+    if force
+        println("--force specified: Running full context pipeline (this may take a while!)")
+        local cmd = `julia --project=. src/context_run/context_run.jl $folder_path`
+        for arg in remaining_args
+            cmd = `$cmd $arg`
+        end
+        if !safe_run(cmd)
+            println("Error running src/context_run/context_run.jl")
+            exit(1)
+        end
+        # Always run distribution step after full context run
+        println("Running distribution step...")
+        if !safe_run(`julia --project=. src/context_run/context_distribution.jl $folder_path`)
+            println("Error running context_distribution.jl")
+            exit(1)
+        end
+        println("Context stage finished successfully.")
+    elseif isfile(context_output)
+        println("Context scores found: Carrying on from context_scores.csv and running remaining steps.")
+        # Run process_best_ranks_context.jl (panel or supertype)
+        mode = "panel"
+        if any(x -> x == "--supertype", remaining_args)
+            mode = "supertype"
+        end
+        best_ranks_cmd = mode == "supertype" ?
+            `julia --project=. src/context_run/process_best_ranks_context.jl $folder_path --supertype` :
+            `julia --project=. src/context_run/process_best_ranks_context.jl $folder_path`
+        if !safe_run(best_ranks_cmd)
+            println("Error running process_best_ranks_context.jl")
+            exit(1)
+        end
+        # Run distribution step
+        println("Running distribution step...")
+        if !safe_run(`julia --project=. src/context_run/context_distribution.jl $folder_path`)
+            println("Error running context_distribution.jl")
+            exit(1)
+        end
+        println("Context distribution step finished successfully.")
+    else
+        println("Context scores not found: Running full context pipeline (this may take a while !)")
+        local cmd = `julia --project=. src/context_run/context_run.jl $folder_path`
+        for arg in remaining_args
+            cmd = `$cmd $arg`
+        end
+        if !safe_run(cmd)
+            println("Error running src/context_run/context_run.jl")
+            exit(1)
+        end
+        # Always run distribution step after full context run
+        println("Running distribution step...")
+        if !safe_run(`julia --project=. src/context_run/context_distribution.jl $folder_path`)
+            println("Error running context_distribution.jl")
+            exit(1)
+        end
+        println("Context stage finished successfully.")
     end
-
-    println("Context stage finished successfully.")
 
 else
     println("Error: Invalid command '$command'.")

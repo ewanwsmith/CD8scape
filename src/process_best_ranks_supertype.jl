@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+process_best_ranks_supertype.jl
+
+Processes best ranks for peptides using a representative supertype HLA panel.
+
+Usage:
+    julia process_best_ranks_supertype.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing processed peptides.
+"""
 
 using DataFrames, CSV, Statistics, StatsBase
 

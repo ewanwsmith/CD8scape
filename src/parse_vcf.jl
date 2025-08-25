@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+parse_vcf.jl
+
+Parses .vcf or .vcf.gz file to extract variant information.
+
+Usage:
+    julia parse_vcf.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing .vcf file.
+"""
 
 using CSV
 using DataFrames

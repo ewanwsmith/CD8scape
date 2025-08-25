@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+read_samfire_frames.jl
+
+Reads Samfire Reading_Frames.dat for open reading frame extraction.
+
+Usage:
+    julia read_samfire_frames.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing Reading_Frames.dat.
+"""
 
 using DataFrames
 using CSV

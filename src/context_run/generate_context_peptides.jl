@@ -57,7 +57,7 @@ frames_path = joinpath(folder, "frames.csv")
 frames = CSV.read(frames_path, DataFrame; normalizenames=true)
 
 # Define output directory based on frames_path
-outdir = joinpath(dirname(frames_path), "..")
+outdir = dirname(frames_path)
 outdir = normpath(outdir)
 
 # Extract Start and End positions from the Region column
@@ -257,11 +257,12 @@ CSV.write(joinpath(outdir, "context_peptides_labels.csv"), dedup_df)
 println("context_peptides_labels.csv file has been written.")
 
 # Save peptides only (no headers) to .pep file
-open(joinpath(outdir, "context_Peptides.pep"), "w") do io
+open(joinpath(outdir, "context_peptides.pep"), "w") do io
     for row in eachrow(dedup_df)
         println(io, row.Peptide)
     end
 end
-println("context_Peptides.pep file has been written.")
+println("context_peptides.pep file has been written.")
+println("Generated .pep file path: ", joinpath(outdir, "context_peptides.pep"))
 
 exit()

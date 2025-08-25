@@ -1,4 +1,16 @@
 #!/usr/bin/env julia
+"""
+run_netMHCpan_global.jl
+
+Runs NetMHCpan for all peptides using a global supertype panel.
+
+Usage:
+    julia run_netMHCpan_global.jl --folder <folder_path>
+
+Arguments:
+    --folder   Path to the folder containing input files.
+"""
+
 include("env.jl")
 using CSV, DataFrames
 

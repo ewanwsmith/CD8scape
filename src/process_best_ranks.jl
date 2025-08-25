@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+process_best_ranks.jl
+
+Processes best ranks for consensus and variant peptides for each locus.
+
+Usage:
+    julia process_best_ranks.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing processed_peptides.csv.
+"""
 
 using DataFrames, CSV, Statistics, StatsBase
 

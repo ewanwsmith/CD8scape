@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+process_background_peptides.jl
+
+Processes background peptides for benchmarking.
+
+Usage:
+    julia process_background_peptides.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing background peptide files.
+"""
 
 using DataFrames, CSV
 
