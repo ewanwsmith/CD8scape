@@ -20,9 +20,11 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
    git clone https://github.com/ewanwsmith/CD8scape.git
    cd CD8scape
    ```
-2. Download and install netMHCpan, then set its path in `src/settings.txt`.
-   - [netMHCpan 4.1 download](https://services.healthtech.dtu.dk/services/NetMHCpan-4.1/)
-   - Add a line to `src/settings.txt`: `NETMHCPAN=/full/path/to/netMHCpan`
+2. Copy `src/settings.txt.example` to `src/settings.txt` and set your netMHCpan path.
+   ```bash
+   cp src/settings.txt.example src/settings.txt
+   # Edit src/settings.txt to set your local NETMHCPAN path
+   ```
 3. Install Julia and Perl dependencies:
    ```bash
    ./CD8scape.jl prep
