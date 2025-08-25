@@ -114,4 +114,4 @@ All commands are run from the repository root:
 If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
 
 ## License
-MIT License
+GNU Public License
