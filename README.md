@@ -1,13 +1,13 @@
 # CD8scape
 
-CD8scape is a pipeline for running netMHCpan on genetic variants, supporting both individual HLA genotypes and supertype panels, with context-sensitive analysis for benchmarking.
+CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or representative supertype panels.
 
 ## Features
 - Automated peptide generation for consensus and variant loci
 - MHC binding prediction using netMHCpan
 - Robust output parsing and best-rank calculation
 - Harmonic mean best rank (HMBR) and fold change analysis
-- Context run for benchmarking observed results against simulated background
+- Context run for placing output metrics in the context of a simulated random background
 
 ## Requirements
 - Perl 5
@@ -89,7 +89,7 @@ All commands are run from the repository root:
 ```bash
 ./CD8scape.jl context <folder_path> [--supertype] [--n_loci <number_of_loci>] [--force]
 ```
-- Runs context-sensitive pipeline to generate simulated loci and peptides, runs netMHCpan, and benchmarks observed fold changes against a background distribution.
+- Runs context-sensitive pipeline to generate simulated loci and peptides, runs netMHCpan, and compares observed fold changes to a distribution of random mutations for the same genome.
 - `--n_loci <number_of_loci>` sets the number of simulated loci (default: 1000).
 - If `--supertype` is provided, uses the representative supertype HLA panel for predictions.
 - If intermediate results exist, resumes from the appropriate step.
