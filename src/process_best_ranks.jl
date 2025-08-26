@@ -92,7 +92,7 @@ function shared_prefix(strings)
 end
 
 description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-    (; Locus = sdf.Locus[1], Description_Root = shared_prefix(sdf.Description))
+    (; Locus = sdf.Locus[1], Description = shared_prefix(sdf.Description))
 end
 
 # Save best_ranks.csv
@@ -128,8 +128,8 @@ if !isempty(best_ranks)
     # Compute shared Description root per Locus
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
 
-    # Reorder to put Locus then Description_Root first
-    pivot_df = select(pivot_df, :Locus, :Description_Root, Not([:Locus, :Description_Root]))
+    # Reorder to put Locus then Description first
+    pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
 
     # Save harmonic mean results with fold change
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv") 
