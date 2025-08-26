@@ -111,7 +111,7 @@ try
 
     # Ensure description_roots is always defined before harmonic mean calculations
     description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-        (; Locus = sdf.Locus[1], Description_Root = shared_prefix(sdf.Peptide_label))
+        (; Locus = sdf.Locus[1], Description = shared_prefix(sdf.Peptide_label))
     end
 
     println("Calculating harmonic mean best ranks (HMBR) for each locus...")
@@ -134,7 +134,7 @@ try
             rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
             pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
             pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-            pivot_df = select(pivot_df, :Locus, :Description_Root, Not([:Locus, :Description_Root]))
+            pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
             harmonic_mean_file = joinpath(folder_path, "context_harmonic_mean_best_ranks.csv")
             CSV.write(harmonic_mean_file, pivot_df)
             println("Saved weighted harmonic mean best ranks with fold change to $harmonic_mean_file")
@@ -145,7 +145,7 @@ try
             rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
             pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
             pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-            pivot_df = select(pivot_df, :Locus, :Description_Root, Not([:Locus, :Description_Root]))
+            pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
             harmonic_mean_file = joinpath(folder_path, "context_harmonic_mean_best_ranks.csv")
             CSV.write(harmonic_mean_file, pivot_df)
             println("Saved harmonic mean best ranks with fold change to $harmonic_mean_file")

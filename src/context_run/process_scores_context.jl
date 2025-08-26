@@ -65,6 +65,11 @@ try
     joined_df = leftjoin(netmhc_df, labels_df, on=["Peptide"])
     println("[process_scores_context] Joined columns: ", names(joined_df))
 
+    # If output DataFrame or CSV uses Description_Root, rename to Description
+    if "Description_Root" in names(joined_df)
+        rename!(joined_df, "Description_Root" => "Description")
+    end
+
     # Write joined DataFrame to output CSV
     CSV.write(output_file, joined_df)
     println("[process_scores_context] Saved scores to $output_file")

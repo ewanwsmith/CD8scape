@@ -50,7 +50,7 @@ observed_df[:, "foldchange_percentile"] = percentiles
 
 # Print results for each locus
 for row in eachrow(observed_df)
-    locus_desc = haskey(row, "Description_Root") ? row["Description_Root"] : "Unknown"
+    locus_desc = haskey(row, "Description") ? row["Description"] : "Unknown"
     println("Locus: $(locus_desc) Fold change = $(row[foldchange_col]), Percentile = $(row["foldchange_percentile"])%")
 end
 

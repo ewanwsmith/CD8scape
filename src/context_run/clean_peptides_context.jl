@@ -45,3 +45,5 @@ catch e
     println("[clean_peptides_context] Error cleaning peptides: $e")
     exit(1)
 end
+
+# If output DataFrame or CSV uses Description_Root, rename to Description
