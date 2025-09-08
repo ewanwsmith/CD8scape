@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+read_ncbi_frames.jl
+
+Reads NCBI reference frames from sequences.fasta for open reading frame extraction.
+
+Usage:
+    julia read_ncbi_frames.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing sequences.fasta.
+"""
 
 """
 Usage:

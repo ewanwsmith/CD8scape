@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+generate_peptides.jl
+
+Generates consensus and variant peptides for each locus from frames and variants data.
+
+Usage:
+    julia generate_peptides.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing frames.csv and variants.csv.
+"""
 
 using DataFrames
 using CSV

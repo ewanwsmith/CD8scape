@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+run_netMHCpan.jl
+
+Runs NetMHCpan for all peptides using provided alleles.
+
+Usage:
+    julia run_netMHCpan.jl --folder <folder_path>
+
+Arguments:
+    --folder   Path to the folder containing input files.
+"""
 
 function parse_arguments()
     args = Dict()

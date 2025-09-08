@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+process_best_ranks_supertype.jl
+
+Processes best ranks for peptides using a representative supertype HLA panel.
+
+Usage:
+    julia process_best_ranks_supertype.jl <folder_path>
+
+Arguments:
+    <folder_path>   Path to the folder containing processed peptides.
+"""
 
 using DataFrames, CSV, Statistics, StatsBase
 
@@ -164,7 +175,7 @@ function shared_prefix(strings)
 end
 
 description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-    (; Locus = sdf.Locus[1], Description_Root = shared_prefix(sdf.Description))
+    (; Locus = sdf.Locus[1], Description = shared_prefix(sdf.Description))
 end
 
 # Save best_ranks.csv
@@ -341,9 +352,9 @@ if !isempty(best_ranks)
     # Fold change V/C
     pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
 
-    # Attach Description_Root and reorder columns (keep original output schema)
+    # Attach Description and reorder columns (keep original output schema)
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-    pivot_df = select(pivot_df, :Locus, :Description_Root, :HMBR_C, :HMBR_V, :foldchange_HMBR)
+    pivot_df = select(pivot_df, :Locus, :Description, :HMBR_C, :HMBR_V, :foldchange_HMBR)
 
     # Save results
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv")

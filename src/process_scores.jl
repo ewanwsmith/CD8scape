@@ -1,4 +1,15 @@
 #!/usr/bin/env julia
+"""
+process_scores.jl
+
+Joins NetMHCpan output with peptide labels for downstream analysis.
+
+Usage:
+    julia process_scores.jl --folder <folder_path>
+
+Arguments:
+    --folder   Path to the folder containing NetMHCpan and label files.
+"""
 
 using DataFrames, CSV
 
