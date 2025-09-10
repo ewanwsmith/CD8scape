@@ -44,18 +44,20 @@ function process_and_join(folder_path::String)::DataFrame
 
     dropped_rows = joined_df[ismissing.(joined_df.Pos), :]
 
-    if "Locus" in names(dropped_rows)
-        grouped_dropped = combine(groupby(dropped_rows, :Locus), nrow => :Dropped_Count)
-        total_per_locus = combine(groupby(joined_df, :Locus), nrow => :Total_Count)
+    if "Locus" in names(joined_df)
+        if !isempty(dropped_rows)
+            grouped_dropped = combine(groupby(dropped_rows, :Locus), nrow => :Dropped_Count)
+            total_per_locus = combine(groupby(joined_df, :Locus), nrow => :Total_Count)
 
-        stats = leftjoin(grouped_dropped, total_per_locus, on=:Locus)
-        stats[:, :Percentage] = round.((stats.Dropped_Count ./ stats.Total_Count) .* 100, digits=2)
+            stats = leftjoin(grouped_dropped, total_per_locus, on=:Locus)
+            stats[:, :Percentage] = round.((stats.Dropped_Count ./ stats.Total_Count) .* 100, digits=2)
 
-        for row in eachrow(stats)
-            println("$(row.Dropped_Count) peptides dropped from locus $(row.Locus) due to stop codon(s) in the peptide ($(row.Percentage)% of total for locus $(row.Locus))")
+            for row in eachrow(stats)
+                println("$(row.Dropped_Count) peptides dropped from locus $(row.Locus) due to stop codon(s) in the peptide ($(row.Percentage)% of total for locus $(row.Locus))")
+            end
         end
     else
-        println("Column 'Locus' not found in dropped rows.")
+        println("Column 'Locus' not found after join. This usually means no matching peptides between NetMHCpan output and peptide labels. Skipping locus-based stats.")
     end
 
     return joined_df

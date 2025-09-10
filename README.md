@@ -111,7 +111,12 @@ All commands are run from the repository root:
 - `context_scores.csv`, `context_harmonic_mean_best_ranks.csv`, `harmonic_mean_best_ranks_with_percentile.csv`: Context run outputs
 
 ## Citation
+
 If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
+
+Example data is from:
+
+Stanevich, O.V., Alekseeva, E.I., Sergeeva, M. et al. SARS-CoV-2 escape from cytotoxic T cells during long-term COVID-19. Nat Commun 14, 149 (2023). https://doi.org/10.1038/s41467-022-34033-x
 
 ## License
 GNU Public License

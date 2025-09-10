@@ -44,27 +44,29 @@ function get_netMHCpan_executable()
     end
 
     for line in readlines(settings_file)
-        line = strip(line)
-        if !isempty(line) && !startswith(line, "#")
-            raw = replace(line, r"['\"]" => "") |> normpath
-            println("NetMHCpan path -> ", raw)
-
-            # Case 1: settings.txt contains a directory path; expect the executable inside it
-            if isdir(raw)
-                exe = joinpath(raw, "netMHCpan")
-                if isfile(exe)
-                    return exe
+        s = strip(line)
+        if isempty(s) || startswith(s, "#")
+            continue
+        end
+        if occursin('=', s)
+            k, v = strip.(split(s, '=', limit=2))
+            if uppercase(k) == "NETMHCPAN"
+                p = normpath(replace(v, "~" => homedir()))
+                println("NetMHCpan path (settings) -> ", p)
+                if isfile(p)
+                    return p
                 else
-                    error("ERROR: Directory '$raw' does not contain 'netMHCpan' executable.")
+                    error("ERROR: Path '$p' does not exist.")
                 end
             end
-
-            # Case 2: settings.txt contains a direct path to the executable
-            if isfile(raw)
-                return raw
+        else
+            p = normpath(replace(s, "~" => homedir()))
+            println("NetMHCpan path (settings) -> ", p)
+            if isfile(p)
+                return p
+            else
+                error("ERROR: Path '$p' does not exist.")
             end
-
-            error("ERROR: Path '$raw' does not exist.")
         end
     end
 
