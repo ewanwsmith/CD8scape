@@ -135,7 +135,8 @@ Removed filtering on consensus match so that all rows are retained here.
 - The same DataFrame with added Relative_Locus, Pulled_Base, and Matches_Consensus columns.
 """
 function check_locus(df::DataFrame)::DataFrame
-    df[!, :Relative_Locus] = df.Locus .- df.Start
+    # Fix: make Relative_Locus 1-based (first nucleotide in frame is 1)
+    df[!, :Relative_Locus] = df.Locus .- df.Start .+ 1
     
     df[!, :Pulled_Base] = [
         (1 ≤ rl ≤ length(seq) ? string(seq[rl]) : missing)
@@ -217,7 +218,8 @@ the data into a new DataFrame with corresponding annotations.
 - A flattened DataFrame with columns for consensus peptides, variant peptides, and labels.
 """
 function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol, lens::Vector{Int})::DataFrame
-    df[!, :AA_Locus] = floor.(Int, df[!, rl] ./ 3) .+ 1
+    # Fix: AA_Locus should be 1-based, so use ceil instead of floor
+    df[!, :AA_Locus] = ceil.(Int, df[!, rl] ./ 3)
 
     out = DataFrame(
         Locus = Int[],
