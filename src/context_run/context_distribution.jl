@@ -40,7 +40,7 @@ context_foldchanges = context_df[:, foldchange_col]
 
 # Function to calculate percentile
 function percentile_rank(value, distribution)
-    n_below = count(x -> x <= value, distribution)
+    n_below = count(x -> !ismissing(x) && x <= value, distribution)
     return 100 * n_below / length(distribution)
 end
 

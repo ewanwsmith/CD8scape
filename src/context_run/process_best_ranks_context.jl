@@ -31,7 +31,7 @@ println("Reading input file: $input_file")
 
 function find_best_ranks(df, suffix)
     # Filter and select best ranks, including HLA
-    subdf = filter(row -> endswith(row.Peptide_label, suffix), df)
+    subdf = filter(row -> !ismissing(row.Peptide_label) && endswith(row.Peptide_label, suffix), df)
     grouped = groupby(subdf, [:Locus, :Peptide_label, :HLA])
     best = combine(grouped, :EL_Rank => minimum => :Best_EL_Rank)
     return best
