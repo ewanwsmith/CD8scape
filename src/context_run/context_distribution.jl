@@ -31,12 +31,36 @@ output_file = joinpath(folder_path, "harmonic_mean_best_ranks_with_percentile.cs
 # Column name for fold change/HMBR
 foldchange_col = "foldchange_HMBR"
 
+
+# Check if observed file exists
+if !isfile(observed_file)
+    println("Observed file $(observed_file) missing. Skipping distribution step.")
+    exit(0)
+end
+
+# Check if context file exists
+if !isfile(context_file)
+    println("Context distribution file $(context_file) missing. Skipping percentile calculation.")
+    observed_df = CSV.read(observed_file, DataFrame)
+    CSV.write(output_file, observed_df)
+    println("Saved simulated output to $(output_file)")
+    exit(0)
+end
+
 # Read context and observed data
 context_df = CSV.read(context_file, DataFrame)
 observed_df = CSV.read(observed_file, DataFrame)
 
 # Extract context fold changes
 context_foldchanges = context_df[:, foldchange_col]
+
+# If context is empty, skip percentile step and output observed_df as simulated output
+if isempty(context_foldchanges)
+    println("Context distribution empty. Skipping percentile calculation.")
+    CSV.write(output_file, observed_df)
+    println("Saved simulated output to $(output_file)")
+    exit(0)
+end
 
 # Function to calculate percentile
 function percentile_rank(value, distribution)
