@@ -62,7 +62,12 @@ while (my $line = <$fh>) {
     for (my $i = 0; $i < $num_haplotypes; $i++) {
         my $start_idx = $haplotype_start + ($i * $cols_per_haplotype);
         my @haplotype_data = @cols[$start_idx .. ($start_idx + $cols_per_haplotype - 1)];
-        print join(",", @fixed_cols, $alleles[$i], @haplotype_data), "\n";
+        # Replace any undefined values with empty string
+        for (my $j = 0; $j < @haplotype_data; $j++) {
+            $haplotype_data[$j] = defined $haplotype_data[$j] ? $haplotype_data[$j] : "";
+        }
+        my $allele = defined $alleles[$i] ? $alleles[$i] : "";
+        print join(",", @fixed_cols, $allele, @haplotype_data), "\n";
     }
 }
 

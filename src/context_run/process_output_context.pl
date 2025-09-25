@@ -61,10 +61,14 @@ while (my $line = <$in>) {
     $line =~ s/^\s+|\s+$//g;
     my @cols = split /\t/, $line;
     my @fixed_cols = @cols[0..2];
-    
+
     for (my $i = 0; $i < $num_haplotypes; $i++) {
         my $start_idx = $haplotype_start + ($i * $cols_per_haplotype);
-        my @haplotype_data = @cols[$start_idx .. ($start_idx + $cols_per_haplotype - 1)];
+        my @haplotype_data;
+        for (my $j = 0; $j < $cols_per_haplotype; $j++) {
+            my $idx = $start_idx + $j;
+            $haplotype_data[$j] = (defined $cols[$idx]) ? $cols[$idx] : 'NA';
+        }
         print $out join(",", @fixed_cols, $alleles[$i], @haplotype_data), "\n";
     }
 }
