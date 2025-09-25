@@ -192,8 +192,8 @@ function translate_sequences(df::DataFrame)::DataFrame
         join([get(CODON_DICT, uppercase(dna_sequence[i:i+2]), "?") 
               for i in 1:3:length(dna_sequence)-2], "")
     
-    df[!, :Consensus_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Consensus_sequence]
-    df[!, :Variant_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Variant_sequence]
+    df[!, :Consensus_AA_sequence] = [translate_dna_to_protein(String(seq)) for seq in df.Consensus_sequence]
+    df[!, :Variant_AA_sequence] = [translate_dna_to_protein(String(seq)) for seq in df.Variant_sequence]
     return df
 end
 
