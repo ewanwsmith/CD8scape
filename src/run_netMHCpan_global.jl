@@ -177,17 +177,68 @@ function main()
         df = filter(row -> row[freq_col] !== missing && row[freq_col] != 0.0, df)
     end
     
-    # Clean allele strings in the discovered allele column
-    clean_allele = function(a)
-        s = String(a)
-        s = replace(s, r"\u00A0" => "")              # non-breaking spaces
-        s = strip(s)
-        # Insert colon if four consecutive digits after '*'
-        s = replace(s, r"\*(\d{2})(\d{2})" => s"*\1:\2")
-        return s
+    # Robust allele normalization (copied from process_best_ranks_supertype.jl)
+    function normalize_allele(s::AbstractString)
+        s2 = String(s)
+        s2 = replace(s2, '\u00A0' => ' ')
+        s2 = replace(s2, r"\s+" => "")
+        s2 = uppercase(s2)
+        m = match(r"^(HLA-[A-Z]+)\*(\d{2}):(\d{2})", s2)
+        if m !== nothing
+            return string(m.captures[1], "*", m.captures[2], ":", m.captures[3])
+        end
+        m = match(r"^(HLA-[A-Z]+)\*(\d{4})$", s2)
+        if m !== nothing
+            g = m.captures[2]
+            return string(m.captures[1], "*", g[1:2], ":", g[3:4])
+        end
+        m = match(r"^(HLA-[A-Z]+)(\d{2}):(\d{2})$", s2)
+        if m !== nothing
+            return string(m.captures[1], "*", m.captures[2], ":", m.captures[3])
+        end
+        m = match(r"^(HLA-[A-Z]+)(\d{4})$", s2)
+        if m !== nothing
+            g = m.captures[2]
+            return string(m.captures[1], "*", g[1:2], ":", g[3:4])
+        end
+        return s2
     end
-    df[!, allele_col] = map(a -> a === missing ? missing : clean_allele(a), df[!, allele_col])
-    
+    df[!, allele_col] = map(a -> a === missing ? missing : normalize_allele(a), df[!, allele_col])
+
+    # --- Neighbour squishing logic with normalization ---
+    neighbours_path = joinpath(@__DIR__, "allele_neighbours.csv")
+    if isfile(neighbours_path)
+        neighbours_df = CSV.read(neighbours_path, DataFrame)
+        rename!(neighbours_df, Dict(n => _clean_sym(n) for n in names(neighbours_df)))
+        # Normalize alleles in mapping for robust matching
+        norm_allele_map = Dict(normalize_allele(String(row.allele)) => row.neighbour for row in eachrow(neighbours_df))
+        squished_alleles = String[]
+        squishing_map = DataFrame(Original=String[], Squished=String[])
+        for a in df[!, allele_col]
+            norm_a = normalize_allele(String(a))
+            if haskey(norm_allele_map, norm_a)
+                squished = norm_allele_map[norm_a]
+                push!(squished_alleles, squished)
+                push!(squishing_map, (Original=String(a), Squished=squished))
+            else
+                println("Warning: squishing step failed for allele: $a (no neighbour match)")
+                push!(squished_alleles, String(a))
+                push!(squishing_map, (Original=String(a), Squished=String(a)))
+            end
+        end
+        df[!, allele_col] = squished_alleles
+        # Output squished panel to folder as supertype_panel_squished.csv
+        squished_panel_path = joinpath(folder_path, "supertype_panel_squished.csv")
+        CSV.write(squished_panel_path, df)
+        println("Squished supertype panel written to $squished_panel_path")
+        # Output squishing map to folder as squishing_map.csv
+        squishing_map_path = joinpath(folder_path, "squishing_map.csv")
+        CSV.write(squishing_map_path, squishing_map)
+        println("Allele squishing map written to $squishing_map_path")
+    else
+        println("Warning: allele_neighbours.csv not found, skipping neighbour squishing.")
+    end
+
     # Build allele list for netMHCpan (remove '*' as expected by downstream)
     allele_list = [replace(String(a), "*" => "") for a in collect(skipmissing(df[!, allele_col])) if !isempty(strip(String(a)))]
     alleles = join(allele_list, ",")
@@ -195,7 +246,7 @@ function main()
     cmd = Cmd([netmhcpan_exec, "-p", peptides_file, "-xls", "-a", alleles, "-xlsfile", xlsfile_path])
     println("Running NetMHCpan with command:")
     println(cmd)
-    
+
     try
         run(cmd)
 

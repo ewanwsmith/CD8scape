@@ -124,15 +124,48 @@ function main()
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
 
+    # Build allele format map from MHC_pseudo.dat
+    settings_file = find_settings_file()
+    pseudo_file = joinpath(dirname(settings_file), "MHC_pseudo.dat")
+    allele_format_map = Dict{String,String}()
+    if isfile(pseudo_file)
+        for line in readlines(pseudo_file)
+            s = strip(line)
+            if isempty(s) || startswith(s, "#")
+                continue
+            end
+            allele = split(s)[1]
+            key = replace(replace(allele, "*" => ""), ":" => "")
+            allele_format_map[key] = allele
+        end
+    else
+        println("Warning: MHC_pseudo.dat not found at $pseudo_file. Allele format resolution will be skipped.")
+    end
+
     if mode == "panel"
         alleles_file = joinpath(folder, "alleles.txt")
         if !isfile(alleles_file)
             error("File $alleles_file not found.")
         end
-        allele_list = open(alleles_file) do file
+        raw_allele_list = open(alleles_file) do file
             [replace(split(line, r"\s+")[1], "*" => "") for line in readlines(file) if !isempty(line)]
         end
+        allele_list = String[]
+        skipped_alleles = String[]
+        for a in raw_allele_list
+            key = replace(replace(a, "*" => ""), ":" => "")
+            if haskey(allele_format_map, key)
+                push!(allele_list, allele_format_map[key])
+            else
+                push!(skipped_alleles, a)
+            end
+        end
+        if !isempty(skipped_alleles)
+            println("Warning: The following alleles were not found in MHC_pseudo.dat and will be skipped:")
+            println(join(skipped_alleles, ", "))
+        end
         alleles = join(allele_list, ",")
+
 
     elseif mode == "supertype"
         function find_representatives_file(folder_path::AbstractString)
@@ -160,6 +193,8 @@ function main()
         end
 
         representatives_file = find_representatives_file(folder)
+        squished_panel_path = joinpath(folder, "supertype_panel_squished.csv")
+        squishing_map_path = joinpath(folder, "squishing_map.csv")
         df = CSV.read(representatives_file, DataFrame; normalizenames=true)
 
         function _clean_sym(n)
@@ -180,34 +215,135 @@ function main()
         allele_col = _find_col(df, "allele")
         freq_col = _find_col(df, "frequency")
 
-        if freq_col !== nothing
-            df[!, freq_col] = map(x -> try
-                    x === missing ? missing :
-                    x isa Number ? float(x) :
-                    parse(Float64, replace(String(x), r"[\s\u00A0]" => ""))
-                catch
-                    missing
-                end, df[!, freq_col])
-            df = filter(row -> row[freq_col] !== missing && row[freq_col] != 0.0, df)
+        # Robust allele normalization
+        function normalize_allele(s::AbstractString)
+            s2 = String(s)
+            s2 = replace(s2, '\u00A0' => ' ')
+            s2 = replace(s2, r"\s+" => "")
+            s2 = uppercase(s2)
+            m = match(r"^(HLA-[A-Z]+)\*(\d{2}):(\d{2})", s2)
+            if m !== nothing
+                return string(m.captures[1], "*", m.captures[2], ":", m.captures[3])
+            end
+            m = match(r"^(HLA-[A-Z]+)\*(\d{4})$", s2)
+            if m !== nothing
+                g = m.captures[2]
+                return string(m.captures[1], "*", g[1:2], ":", g[3:4])
+            end
+            m = match(r"^(HLA-[A-Z]+)(\d{2}):(\d{2})$", s2)
+            if m !== nothing
+                return string(m.captures[1], "*", m.captures[2], ":", m.captures[3])
+            end
+            m = match(r"^(HLA-[A-Z]+)(\d{4})$", s2)
+            if m !== nothing
+                g = m.captures[2]
+                return string(m.captures[1], "*", g[1:2], ":", g[3:4])
+            end
+            return s2
+        end
+        df[!, allele_col] = map(a -> a === missing ? missing : normalize_allele(a), df[!, allele_col])
+
+        # --- Neighbour squishing logic with normalization ---
+        neighbours_path = joinpath(@__DIR__, "..", "allele_neighbours.csv")
+        squishing_map = DataFrame(Original=String[], Squished=String[])
+        if isfile(neighbours_path)
+            neighbours_df = CSV.read(neighbours_path, DataFrame)
+            rename!(neighbours_df, Dict(n => _clean_sym(n) for n in names(neighbours_df)))
+            norm_allele_map = Dict(normalize_allele(String(row.allele)) => row.neighbour for row in eachrow(neighbours_df))
+            squished_alleles = String[]
+            for a in df[!, allele_col]
+                norm_a = normalize_allele(String(a))
+                if haskey(norm_allele_map, norm_a)
+                    squished = norm_allele_map[norm_a]
+                    push!(squished_alleles, squished)
+                    push!(squishing_map, (Original=String(a), Squished=squished))
+                else
+                    println("Warning: squishing step failed for allele: $a (no neighbour match)")
+                    push!(squished_alleles, String(a))
+                    push!(squishing_map, (Original=String(a), Squished=String(a)))
+                end
+            end
+            df[!, allele_col] = squished_alleles
+            CSV.write(squished_panel_path, df)
+            println("Squished supertype panel written to $squished_panel_path")
+            CSV.write(squishing_map_path, squishing_map)
+            println("Allele squishing map written to $squishing_map_path")
+        else
+            println("Warning: allele_neighbours.csv not found, skipping neighbour squishing.")
         end
 
-        clean_allele = function(a)
-            s = String(a)
-            s = replace(s, r"\u00A0" => "")
-            s = strip(s)
-            s = replace(s, r"\*(\d{2})(\d{2})" => s"*\1:\2")
-            return s
+        # Build allele list for netMHCpan (remove '*' as expected by downstream)
+        raw_allele_list = [replace(String(a), "*" => "") for a in collect(skipmissing(df[!, allele_col])) if !isempty(strip(String(a)))]
+        allele_list = String[]
+        skipped_alleles = String[]
+        for a in raw_allele_list
+            key = replace(replace(a, "*" => ""), ":" => "")
+            if haskey(allele_format_map, key)
+                push!(allele_list, allele_format_map[key])
+            else
+                push!(skipped_alleles, a)
+            end
         end
-        df[!, allele_col] = map(a -> a === missing ? missing : clean_allele(a), df[!, allele_col])
-        allele_list = [replace(String(a), "*" => "") for a in collect(skipmissing(df[!, allele_col])) if !isempty(strip(String(a)))]
+        if !isempty(skipped_alleles)
+            println("Warning: The following alleles were not found in MHC_pseudo.dat and will be skipped:")
+            println(join(skipped_alleles, ", "))
+        end
         alleles = join(allele_list, ",")
 
     else
         error("Unsupported mode: $mode. Use panel or supertype.")
     end
 
-    cmd = `$netmhcpan -p $peptides_file -xls -a $alleles -xlsfile $xlsfile_path`
-    run_netmhcpan(cmd, xlsfile_path)
+    # Chunk alleles by total character length (≤1024 chars for -a argument)
+    max_chars = 1024
+    allele_chunks = Vector{Vector{String}}()
+    current_chunk = String[]
+    current_len = 0
+    for allele in allele_list
+        add_len = length(allele) + (isempty(current_chunk) ? 0 : 1)
+        if current_len + add_len > max_chars
+            push!(allele_chunks, current_chunk)
+            current_chunk = String[]
+            current_len = 0
+        end
+        push!(current_chunk, allele)
+        current_len += add_len
+    end
+    if !isempty(current_chunk)
+        push!(allele_chunks, current_chunk)
+    end
+    temp_files = String[]
+
+    for (i, chunk) in enumerate(allele_chunks)
+        if isempty(chunk)
+            println("Skipping empty chunk $(i)")
+            continue
+        end
+        alleles_str = join(chunk, ",")
+        chunk_out = joinpath(folder, "netMHCpan_output_chunk$(i).tsv")
+        cmd = `$netmhcpan -p $peptides_file -xls -a $alleles_str -xlsfile $chunk_out`
+        run_netmhcpan(cmd, chunk_out)
+        if isfile(chunk_out)
+            push!(temp_files, chunk_out)
+        end
+    end
+
+    # Join chunk outputs
+    println("Joining NetMHCpan outputs...")
+    open(xlsfile_path, "w") do out_io
+        for (i, temp_file) in enumerate(temp_files)
+            open(temp_file, "r") do in_io
+                for (j, line) in enumerate(eachline(in_io))
+                    # Write header only for first chunk
+                    if i == 1 || j > 1
+                        write(out_io, line, "\n")
+                    end
+                end
+            end
+            rm(temp_file)
+        end
+    end
+    println("NetMHCpan outputs joined to $xlsfile_path")
 end
 
 main()
