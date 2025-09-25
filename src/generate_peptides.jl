@@ -384,7 +384,7 @@ filtered_loci = filter(row -> begin
         row.Consensus_AA_sequence[locus] != row.Variant_AA_sequence[locus]
     end
 end, translated)
-println("Dropped $(nrow(syn_loci)) synonymous loci (no amino acid change at mutation position).")
+println("Dropped $(nrow(syn_loci)) synonymous loci.")
 
 # Define locus-based peptide lengths to generate
 substr_lengths = [8, 9, 10, 11]
