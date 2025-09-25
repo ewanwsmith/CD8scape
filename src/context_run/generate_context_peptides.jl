@@ -1,3 +1,29 @@
+#!/usr/bin/env julia
+
+"""
+This script generates context peptides from genomic frames data.
+
+Purpose:
+- Reads a CSV file containing genomic frames.
+- Samples random loci within these frames.
+- Introduces random nucleotide mutations.
+- Translates DNA sequences to amino acids.
+- Generates peptides centered on mutated amino acid loci.
+- Filters peptides containing stop codons or identical consensus/variant sequences.
+- Outputs labeled peptides to CSV and .pep files.
+
+Usage:
+    julia generate_context_peptides.jl --folder <path_to_folder> [--n_loci <number_of_loci>]
+
+Arguments:
+    --folder   Path to the folder containing 'frames.csv'.
+    --n_loci   Number of loci to simulate (default: 1000).
+"""
+
+using ArgParse
+using CSV, DataFrames
+using Random
+using FilePathsBase
 
 # Define codon to amino acid translation dictionary
 const CODON_DICT = Dict(
@@ -26,7 +52,6 @@ function translate_dna_to_protein(dna_sequence::String)::String
           for i in 1:3:length(dna_sequence)-2], "")
 end
 
-# Function to generate peptides containing the amino acid locus for given lengths
 function generate_peptides(sequence::String, aa_locus::Int, lengths::Vector{Int})::Vector{String}
     peptides = String[]
     for len in lengths
@@ -41,33 +66,6 @@ function generate_peptides(sequence::String, aa_locus::Int, lengths::Vector{Int}
     end
     return peptides
 end
-
-#!/usr/bin/env julia
-"""
-This script generates context peptides from genomic frames data.
-
-Purpose:
-- Reads a CSV file containing genomic frames.
-- Samples random loci within these frames.
-- Introduces random nucleotide mutations.
-- Translates DNA sequences to amino acids.
-- Generates peptides centered on mutated amino acid loci.
-- Filters peptides containing stop codons or identical consensus/variant sequences.
-- Outputs labeled peptides to CSV and .pep files.
-
-Usage:
-    julia generate_context_peptides.jl --folder <path_to_folder> [--n_loci <number_of_loci>]
-
-Arguments:
-    --folder   Path to the folder containing 'frames.csv'.
-    --n_loci   Number of loci to simulate (default: 1000).
-"""
-
-using ArgParse
-using CSV, DataFrames
-using Random
-
-using FilePathsBase
 
 # Function to print help message for command-line usage
 function print_help()
@@ -172,7 +170,7 @@ function main()
         )
         context_rows = vcat(context_rows, new_row)
     end
-    println("Generated $n_loci non-synonymous random mutations in $tries attempts.")
+    # ...existing code...
 
     # ...existing code...
 
@@ -234,7 +232,7 @@ function main()
 
     final_rows = nrow(filtered_df)
     removed_rows = initial_rows - final_rows
-    println("Removed $removed_rows peptides from $removed_loci loci due to stop codons.")
+    # ...existing code...
 
     # Flatten DataFrame to separate consensus and variant peptides for output
     flattened_df = DataFrame(
@@ -266,7 +264,7 @@ function main()
 
     # Save deduplicated peptides with labels to CSV file
     CSV.write(joinpath(outdir, "context_peptides_labels.csv"), dedup_df)
-    println("context_peptides_labels.csv file has been written.")
+    # ...existing code...
 
     # Save peptides only (no headers) to .pep file
     open(joinpath(outdir, "context_peptides.pep"), "w") do io
@@ -274,5 +272,8 @@ function main()
             println(io, row.Peptide)
         end
     end
-    println("context_peptides.pep file has been written.")
+    # ...existing code...
 end
+
+# Call main only after all definitions
+main()
