@@ -31,4 +31,5 @@ Manifest.toml
 
 # Ignore local settings file
 src/settings.txt
+.DS_Store
 src/MHC_pseudo.dat
