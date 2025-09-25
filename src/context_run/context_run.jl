@@ -61,11 +61,11 @@ function main()
         end
     end
 
-    # Call generate_context_peptides.jl
+    # ...existing code...
     generate_script = joinpath(@__DIR__, "generate_context_peptides.jl")
     local cmd = `julia $generate_script --folder $folder_path --n_loci $n_loci`
-
     run(cmd)
+    # ...existing code...
 
     # Case-insensitive lookup of context_peptides.pep
     matches = filter(f -> lowercase(basename(f)) == "context_peptides.pep", readdir(folder_path; join=true))
