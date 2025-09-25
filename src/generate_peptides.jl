@@ -356,19 +356,44 @@ end
 data_folder = ARGS[1]
 
 # Run the processing pipeline
+
+
 joined = join_data(data_folder)
 checked = check_locus(joined)
 edited = edit_consensus_sequence(checked)
 translated = translate_sequences(edited)
 
+# Calculate AA_Locus (1-based, from Relative_Locus)
+translated[!, :AA_Locus] = ceil.(Int, translated[!, :Relative_Locus] ./ 3)
+
+
+# Remove loci with no amino acid change at the mutation position
+syn_loci = filter(row -> begin
+    locus = row.AA_Locus isa Int ? row.AA_Locus : tryparse(Int, row.AA_Locus)
+    if locus === nothing || locus < 1 || locus > min(length(row.Consensus_AA_sequence), length(row.Variant_AA_sequence))
+        false
+    else
+        row.Consensus_AA_sequence[locus] == row.Variant_AA_sequence[locus]
+    end
+end, translated)
+filtered_loci = filter(row -> begin
+    locus = row.AA_Locus isa Int ? row.AA_Locus : tryparse(Int, row.AA_Locus)
+    if locus === nothing || locus < 1 || locus > min(length(row.Consensus_AA_sequence), length(row.Variant_AA_sequence))
+        false
+    else
+        row.Consensus_AA_sequence[locus] != row.Variant_AA_sequence[locus]
+    end
+end, translated)
+println("Dropped $(nrow(syn_loci)) synonymous loci (no amino acid change at mutation position).")
+
 # Define locus-based peptide lengths to generate
 substr_lengths = [8, 9, 10, 11]
 
 flattened_peptides_df = add_peptides_columns!(
-    translated, 
-    :Relative_Locus, 
-    :Consensus_AA_sequence, 
-    :Variant_AA_sequence, 
+    filtered_loci,
+    :Relative_Locus,
+    :Consensus_AA_sequence,
+    :Variant_AA_sequence,
     substr_lengths
 )
 
