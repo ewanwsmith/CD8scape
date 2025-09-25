@@ -108,6 +108,8 @@ try
     # Ensure HLA is included, then rename to Allele for matching
     rename!(best_ranks, Dict(:HLA => :Allele))
     best_ranks = select(best_ranks, :Locus, :Peptide_label, :Allele, :Best_EL_Rank, :Peptide_Type, Not([:Locus, :Peptide_label, :Allele, :Best_EL_Rank, :Peptide_Type]))
+    # Robustly parse Best_EL_Rank as Float64, replace non-numeric with missing
+    best_ranks.Best_EL_Rank = [tryparse(Float64, strip(string(x))) === nothing ? missing : tryparse(Float64, strip(string(x))) for x in best_ranks.Best_EL_Rank]
 
     # Ensure description_roots is always defined before harmonic mean calculations
     description_roots = combine(groupby(best_ranks, :Locus)) do sdf
@@ -126,26 +128,58 @@ try
             grouped = groupby(best_ranks, [:Locus, :Peptide_Type])
             agg = combine(grouped) do sdf
                 alleles = normalize_allele.(string.(sdf.Allele))
-                ranks = Float64.(sdf.Best_EL_Rank)
+                ranks = collect(skipmissing(sdf.Best_EL_Rank))
                 weights = [get(wmap, String(a), missing) for a in alleles]
                 (; HMBR = hmean_weighted(ranks, weights))
             end
-            pivot_df = unstack(agg, :Peptide_Type, :HMBR)
-            rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
-            pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
-            pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-            pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+            if !isempty(agg) && :HMBR in propertynames(agg)
+                pivot_df = unstack(agg, :Peptide_Type, :HMBR)
+                rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
+                pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+                pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
+                pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+            else
+                pivot_df = DataFrame(Locus=String[], Description=String[], HMBR_C=Float64[], HMBR_V=Float64[], foldchange_HMBR=Float64[])
+            end
             harmonic_mean_file = joinpath(folder_path, "context_harmonic_mean_best_ranks.csv")
             CSV.write(harmonic_mean_file, pivot_df)
             println("Saved weighted harmonic mean best ranks with fold change to $harmonic_mean_file")
         else
             # Standard (unweighted) calculation
-            pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
-                :Best_EL_Rank => harmmean => :HMBR), :Peptide_Type, :HMBR)
-            rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
-            pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
-            pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-            pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+            # Only use non-missing Best_EL_Rank values for harmonic mean
+            # Robust harmonic mean calculation and filtering
+            function safe_harmmean(x)
+                vals = [v for v in x if !ismissing(v) && (isa(v, Number) || tryparse(Float64, v) !== nothing)]
+                vals = [isa(v, Number) ? v : parse(Float64, v) for v in vals]
+                isempty(vals) ? missing : harmmean(vals)
+            end
+            temp_df = combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
+                :Best_EL_Rank => safe_harmmean => :HMBR)
+            if !isempty(temp_df) && :HMBR in propertynames(temp_df)
+                pivot_df = unstack(temp_df, :Peptide_Type, :HMBR)
+                rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
+                # Report missing values before fold change calculation
+                for row in eachrow(pivot_df)
+                    if ismissing(row.HMBR_C)
+                        println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
+                    elseif ismissing(row.HMBR_V)
+                        println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
+                    end
+                end
+                # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
+                before_filter = nrow(pivot_df)
+                pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
+                removed_count = before_filter - nrow(pivot_df)
+                println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
+                # Calculate fold change (Derived (_V) / Ancestral (_C))
+                pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+                # Compute shared Description root per Locus
+                pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
+                # Reorder to put Locus then Description first
+                pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+            else
+                pivot_df = DataFrame(Locus=String[], Description=String[], HMBR_C=Float64[], HMBR_V=Float64[], foldchange_HMBR=Float64[])
+            end
             harmonic_mean_file = joinpath(folder_path, "context_harmonic_mean_best_ranks.csv")
             CSV.write(harmonic_mean_file, pivot_df)
             println("Saved harmonic mean best ranks with fold change to $harmonic_mean_file")

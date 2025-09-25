@@ -103,8 +103,14 @@ println("Saved best ranks to $best_ranks_file")
 # Pivot best_ranks to have separate columns for HMBR_C and HMBR_V
 println("Calculating harmonic mean best ranks (HMBR) for each locus...")
 if !isempty(best_ranks)
+    # Only use numeric Best_EL_Rank values for harmonic mean
+    function safe_harmmean(x)
+        vals = [v for v in x if !ismissing(v) && (isa(v, Number) || tryparse(Float64, v) !== nothing)]
+        vals = [isa(v, Number) ? v : parse(Float64, v) for v in vals]
+        isempty(vals) ? missing : harmmean(vals)
+    end
     pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
-        :Best_EL_Rank => harmmean => :HMBR), :Peptide_Type, :HMBR)
+        :Best_EL_Rank => safe_harmmean => :HMBR), :Peptide_Type, :HMBR)
     rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
 
     # Identify and report missing values before fold change calculation
