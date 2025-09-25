@@ -29,7 +29,7 @@ folder_path = ARGS[1]
 input_file = joinpath(folder_path, "context_peptides.pep")
 output_file = joinpath(folder_path, "context_cleaned_peptides.csv")
 
-println("[clean_peptides_context] Reading input file: $input_file")
+println("Reading input file: $input_file")
 
 try
     lines = readlines(input_file)
@@ -40,9 +40,9 @@ try
             write(f, line * "\n")
         end
     end
-    println("[clean_peptides_context] Saved cleaned peptides to $output_file")
+    println("Saved cleaned peptides to $output_file")
 catch e
-    println("[clean_peptides_context] Error cleaning peptides: $e")
+    println("Error cleaning peptides: $e")
     exit(1)
 end
 
