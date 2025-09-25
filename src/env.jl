@@ -14,6 +14,7 @@ required_packages = [
     "ArgParse",
     "CodecZlib",
     "Statistics",
+    "Random",
     "StatsBase",
 ]
 
