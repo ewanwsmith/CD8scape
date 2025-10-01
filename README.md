@@ -105,7 +105,7 @@ All commands are run from the repository root:
 ```
 - As above, but uses a representative supertype HLA panel.
 
-### 5. Context Run (Benchmarking)
+### 5. Run Pipeline (Data Simulation)
 ```bash
 ./CD8scape.jl context <folder_path> [--supertype] [--n_loci <number_of_loci>] [--seed <random_seed>] [--force]
 ```
