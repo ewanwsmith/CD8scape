@@ -27,6 +27,7 @@ COMMANDS:
   run     Run the peptide-generation and NetMHCpan pipeline on parsed data.
   run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertpe HLA panel.
   context Run the context-sensitive peptide processing pipeline.
+          Additional options: --force, --seed <number> (default: 1320), --mode panel|supertype, --n_loci <number>
 
 OPTIONS:
   --help, -h
