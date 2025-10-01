@@ -34,14 +34,15 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 
 CD8scape expects a folder containing the following files:
 
-- **alleles.txt**: List of HLA alleles, one per line (e.g., `HLA-A01:01`).
+- **alleles.txt**: List of HLA alleles, one per line (e.g., `HLA-A01:01`). File name is case-insensitive.
 - **Variant file**: Either
   - `single_locus_trajectories.out` (from [Samfire](https://github.com/cjri/samfire)), or
-  - Any `.out` file with Samfire-compatible format, or
+  - Any `.out` file with SAMFIRE format, or
   - `.vcf` or `.vcf.gz` file (standard variant call format).
 - **Reading frame file**: Either
   - `Reading_Frames.dat` (from [Samfire](https://github.com/cjri/samfire)), or
-  - `sequences.fasta` (reference genome from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)).
+  - `sequences.fa/fasta` (reference genome from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)).
+- **consensus.fa/fasta** (required only with NCBI sequences): Reference consensus sequence file containing the full genome sequence. This file is needed when using `sequences.fa/fasta` from NCBI, as it provides the complete reference sequence from which reading frame regions are extracted based on coordinates specified in the sequences file headers.
 
 ### Example: alleles.txt
 ```
@@ -54,12 +55,29 @@ HLA-C07:02
 ### Folder Structure Example
 ```
 <your_data_folder>/
-    alleles.txt
-    single_locus_trajectories.out   # or variants.vcf
-    Reading_Frames.dat              # or sequences.fasta
+    alleles.txt                     # HLA alleles (case-insensitive filename)
+    single_locus_trajectories.out   # or any .out file with SAMFIRE format, or .vcf/.vcf.gz
+    Reading_Frames.dat              # or sequences.fa/fasta + consensus.fa/fasta
 ```
 
+**Note**: When using NCBI format with `sequences.fa/fasta`, you must also provide `consensus.fa/fasta` containing the full reference genome. The sequences file contains coordinate ranges that are extracted from the consensus sequence.
+
+CD8scape uses case-insensitive file discovery, so files can be named with any capitalization (e.g., `alleles.txt`, `Alleles.txt`, `ALLELES.TXT` are all acceptable). Both `.fa` and `.fasta` extensions are supported for sequence files.
+
 CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. For Samfire, see [Samfire GitHub](https://github.com/cjri/samfire) for details on generating `.out` and `.dat` files.
+
+### Reading Frame Formats
+
+CD8scape supports two reading frame input formats:
+
+1. **Samfire format**: Uses `Reading_Frames.dat` containing pre-extracted reading frame sequences. This is a self-contained format where each reading frame is already provided as a sequence.
+
+2. **NCBI format**: Uses `sequences.fa/fasta` + `consensus.fa/fasta` where:
+   - `sequences.fa/fasta` contains headers with coordinate ranges (e.g., `>accession:77..496`)
+   - `consensus.fa/fasta` contains the full reference genome sequence
+   - CD8scape extracts the specified coordinate ranges from the consensus sequence to generate reading frames
+
+The NCBI format is useful when working with reference genomes from databases like NCBI Virus, where you have coordinate information and need to extract specific regions from a full genome sequence.
 
 ## Usage
 All commands are run from the repository root:
@@ -106,10 +124,15 @@ All commands are run from the repository root:
 
 ## Output Files
 - `variants.csv`, `frames.csv`: Parsed input data
-- `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
+- `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels  
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
+- `processed_peptides.csv`: Processed peptides with scores
 - `best_ranks.csv`, `harmonic_mean_best_ranks.csv`: Best ranks and fold change analysis
-- `context_scores.csv`, `context_harmonic_mean_best_ranks.csv`, `harmonic_mean_best_ranks_with_percentile.csv`: Context run outputs
+- Context run outputs:
+  - `context_peptides.pep`: Generated context peptides
+  - `context_processed_netMHCpan_output.csv`: Processed context results
+  - `context_scores.csv`, `context_harmonic_mean_best_ranks.csv`: Context analysis results
+  - `harmonic_mean_best_ranks_with_percentile.csv`: Final results with percentile comparisons
 
 ## Citation
 
