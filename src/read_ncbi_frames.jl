@@ -171,27 +171,38 @@ function main()
 
     folder_path = abspath(ARGS[1])
 
-    # Attempt to find sequences.(fa|fasta)
-    possible_paths_seq = [
-        joinpath(folder_path, "sequences.fa"),
-        joinpath(folder_path, "sequences.fasta")
-    ]
-    idx_seq = findfirst(isfile, possible_paths_seq)
-    if idx_seq === nothing
+    # Attempt to find sequences.(fa|fasta) - case insensitive
+    function find_file_case_insensitive(folder, basename, extensions)
+        for ext in extensions
+            # Check all possible case combinations
+            patterns = [
+                lowercase(basename) * "." * lowercase(ext),
+                lowercase(basename) * "." * uppercase(ext),
+                uppercase(basename) * "." * lowercase(ext),
+                uppercase(basename) * "." * uppercase(ext),
+                titlecase(basename) * "." * lowercase(ext),
+                titlecase(basename) * "." * uppercase(ext)
+            ]
+            for pattern in patterns
+                filepath = joinpath(folder, pattern)
+                if isfile(filepath)
+                    return filepath
+                end
+            end
+        end
+        return nothing
+    end
+    
+    sequences_fa = find_file_case_insensitive(folder_path, "sequences", ["fa", "fasta"])
+    if sequences_fa === nothing
         error("No sequences.fa or sequences.fasta file found in $folder_path")
     end
-    sequences_fa = possible_paths_seq[idx_seq]
 
-    # Attempt to find .consensus(fa|fasta)
-    possible_paths_cons = [
-        joinpath(folder_path, "consensus.fa"),
-        joinpath(folder_path, "consensus.fasta")
-    ]
-    idx_cons = findfirst(isfile, possible_paths_cons)
-    if idx_cons === nothing
+    # Attempt to find consensus.(fa|fasta) - case insensitive
+    consensus_fa = find_file_case_insensitive(folder_path, "consensus", ["fa", "fasta"])
+    if consensus_fa === nothing
         error("No consensus.fa or consensus.fasta file found in $folder_path")
     end
-    consensus_fa = possible_paths_cons[idx_cons]
 
     println("Using sequences file: $sequences_fa")
     println("Using consensus file: $consensus_fa")
