@@ -89,10 +89,11 @@ All commands are run from the repository root:
 
 ### 5. Context Run (Benchmarking)
 ```bash
-./CD8scape.jl context <folder_path> [--supertype] [--n_loci <number_of_loci>] [--force]
+./CD8scape.jl context <folder_path> [--supertype] [--n_loci <number_of_loci>] [--seed <random_seed>] [--force]
 ```
 - Runs context-sensitive pipeline to generate simulated loci and peptides, runs netMHCpan, and compares observed fold changes to a distribution of random mutations for the same genome.
 - `--n_loci <number_of_loci>` sets the number of simulated loci (default: 1000).
+- `--seed <random_seed>` sets the random number seed for reproducible loci selection (default: 1320).
 - If `--supertype` is provided, uses the representative supertype HLA panel for predictions.
 - If intermediate results exist, resumes from the appropriate step.
 - Use `--force` to rerun the full pipeline.
