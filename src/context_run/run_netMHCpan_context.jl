@@ -143,9 +143,30 @@ function main()
     end
 
     if mode == "panel"
-        alleles_file = joinpath(folder, "alleles.txt")
-        if !isfile(alleles_file)
-            error("File $alleles_file not found.")
+        # Case insensitive search for alleles file
+        function find_file_case_insensitive(folder, basename, extensions)
+            for ext in extensions
+                patterns = [
+                    lowercase(basename) * "." * lowercase(ext),
+                    lowercase(basename) * "." * uppercase(ext),
+                    uppercase(basename) * "." * lowercase(ext),
+                    uppercase(basename) * "." * uppercase(ext),
+                    titlecase(basename) * "." * lowercase(ext),
+                    titlecase(basename) * "." * uppercase(ext)
+                ]
+                for pattern in patterns
+                    filepath = joinpath(folder, pattern)
+                    if isfile(filepath)
+                        return filepath
+                    end
+                end
+            end
+            return nothing
+        end
+        
+        alleles_file = find_file_case_insensitive(folder, "alleles", ["txt"])
+        if alleles_file === nothing
+            error("File alleles.txt (case insensitive) not found in $folder.")
         end
         raw_allele_list = open(alleles_file) do file
             [replace(split(line, r"\s+")[1], "*" => "") for line in readlines(file) if !isempty(line)]
