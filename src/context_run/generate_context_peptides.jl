@@ -13,11 +13,12 @@ Purpose:
 - Outputs labeled peptides to CSV and .pep files.
 
 Usage:
-    julia generate_context_peptides.jl --folder <path_to_folder> [--n_loci <number_of_loci>]
+    julia generate_context_peptides.jl --folder <path_to_folder> [--n_loci <number_of_loci>] [--seed <random_seed>]
 
 Arguments:
     --folder   Path to the folder containing 'frames.csv'.
     --n_loci   Number of loci to simulate (default: 1000).
+    --seed     Random number seed (default: 1320).
 """
 
 using ArgParse
@@ -76,6 +77,7 @@ function print_help()
     Arguments:
         --folder   Path to the folder containing 'frames.csv'.
         --n_loci   Number of loci to simulate (default: 1000).
+        --seed     Random number seed (default: 1320).
     """)
 end
 
@@ -88,11 +90,16 @@ s = ArgParseSettings()
         help = "Number of loci to simulate"
         arg_type = Int
         default = 1000
+    "--seed"
+        help = "Random number seed"
+        arg_type = Int
+        default = 1320
 end
 
 parsed_args = parse_args(s)
 folder = parsed_args["folder"]
 n_loci = parsed_args["n_loci"]
+seed = parsed_args["seed"]
 frames_path = joinpath(folder, "frames.csv")
 
 # Load the CSV containing genomic frames data
@@ -106,9 +113,7 @@ outdir = normpath(outdir)
 frames.Start = map(r -> parse(Int, split(split(r, ";")[1], ",")[1]), frames.Region)
 frames.End   = map(r -> parse(Int, split(split(r, ";")[end], ",")[end]), frames.Region)
 
-# Read and set random seed for reproducibility
-seed_path = joinpath(@__DIR__, "random_seed.txt")
-seed = parse(Int, strip(read(seed_path, String)))
+# Set random seed for reproducibility
 Random.seed!(seed)
 
 # Generate random loci uniformly across all unique loci in all frames
