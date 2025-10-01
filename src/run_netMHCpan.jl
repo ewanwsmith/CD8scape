@@ -115,8 +115,31 @@ function main()
     netMHCpan_exe = get_netMHCpan_executable()
     println("Using NetMHCpan executable: ", netMHCpan_exe)
 
-    # File paths
-    alleles_file = joinpath(folder_path, "alleles.txt")
+    # File paths - case insensitive search for alleles
+    function find_file_case_insensitive(folder, basename, extensions)
+        for ext in extensions
+            patterns = [
+                lowercase(basename) * "." * lowercase(ext),
+                lowercase(basename) * "." * uppercase(ext),
+                uppercase(basename) * "." * lowercase(ext),
+                uppercase(basename) * "." * uppercase(ext),
+                titlecase(basename) * "." * lowercase(ext),
+                titlecase(basename) * "." * uppercase(ext)
+            ]
+            for pattern in patterns
+                filepath = joinpath(folder, pattern)
+                if isfile(filepath)
+                    return filepath
+                end
+            end
+        end
+        return nothing
+    end
+    
+    alleles_file = find_file_case_insensitive(folder_path, "alleles", ["txt"])
+    if alleles_file === nothing
+        alleles_file = joinpath(folder_path, "alleles.txt")  # fallback to original name for error message
+    end
     peptides_file = joinpath(folder_path, "Peptides.pep")
     xlsfile_path = joinpath(folder_path, "netMHCpan_output.tsv")
 
