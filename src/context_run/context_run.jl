@@ -8,13 +8,14 @@ Purpose:
 - Passes options to each step as needed.
 
 Usage:
-    julia context_run.jl <folder_path> [--n_loci <number_of_loci>] [--mode panel|supertype] [--override]
+    julia context_run.jl <folder_path> [--n_loci <number_of_loci>] [--mode panel|supertype] [--override] [--seed <random_seed>]
 
 Arguments:
     <folder_path>   Path to the folder containing input files.
     --n_loci        Number of loci to simulate (default: 1000).
     --mode          Run mode: panel or supertype (default: panel).
     --override      Optional flag to override existing outputs.
+    --seed          Random number seed (default: 1320).
 """
 
 using CSV, DataFrames, FilePathsBase
@@ -40,6 +41,7 @@ function main()
     n_loci = 1000
     mode = "panel"
     override = false
+    seed = 1320
 
     # Parse additional arguments
     for (i, arg) in enumerate(ARGS)
@@ -58,12 +60,19 @@ function main()
             end
         elseif arg == "--override"
             override = true
+        elseif arg == "--seed" && i < length(ARGS)
+            try
+                seed = parse(Int, ARGS[i + 1])
+            catch
+                println("Error: Invalid value for --seed.")
+                exit(1)
+            end
         end
     end
 
     # ...existing code...
     generate_script = joinpath(@__DIR__, "generate_context_peptides.jl")
-    local cmd = `julia $generate_script --folder $folder_path --n_loci $n_loci`
+    local cmd = `julia $generate_script --folder $folder_path --n_loci $n_loci --seed $seed`
     run(cmd)
     # ...existing code...
 
