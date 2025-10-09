@@ -34,7 +34,7 @@ end
 
 # Function to find minimum EL_Rank by Locus and MHC for given peptide pattern
 function find_best_ranks(df, pattern)
-    subset = filter(row -> !ismissing(row.Peptide_label) && endswith(row.Peptide_label, pattern), df)
+    subset = filter(row -> !ismissing(row.Peptide_label) && contains(row.Peptide_label, pattern), df)
     if isempty(subset)
         println("Warning: No peptides found for pattern '$pattern'")
         return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
