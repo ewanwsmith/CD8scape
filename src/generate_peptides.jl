@@ -163,12 +163,34 @@ function edit_consensus_sequence(df::DataFrame)::DataFrame
     for row in eachrow(df)
         rl = row.Relative_Locus
         consensus = row.Consensus_sequence
+        consensus_nt = row.Consensus
         variant_nt = row.Variant
 
         if !ismissing(rl) && 1 ≤ rl ≤ length(consensus)
-            seq = collect(consensus)
-            seq[rl] = variant_nt[1]  # <-- fix is here
-            row.Variant_sequence = join(seq)
+            # Handle different types of variants
+            if length(consensus_nt) == length(variant_nt)
+                # SNV: Simple substitution
+                seq = collect(consensus)
+                seq[rl] = variant_nt[1]
+                row.Variant_sequence = join(seq)
+            elseif length(consensus_nt) > length(variant_nt)
+                # Deletion: Remove nucleotides
+                deletion_length = length(consensus_nt) - length(variant_nt)
+                seq = collect(consensus)
+                # Replace the REF sequence with ALT sequence at the specified position
+                seq_before = seq[1:(rl-1)]
+                seq_after = seq[(rl + length(consensus_nt)):end]
+                new_seq = vcat(seq_before, collect(variant_nt), seq_after)
+                row.Variant_sequence = join(new_seq)
+            else
+                # Insertion: Add nucleotides
+                seq = collect(consensus)
+                # Replace the REF sequence with ALT sequence
+                seq_before = seq[1:(rl-1)]
+                seq_after = seq[(rl + length(consensus_nt)):end]
+                new_seq = vcat(seq_before, collect(variant_nt), seq_after)
+                row.Variant_sequence = join(new_seq)
+            end
         else
             row.Variant_sequence = consensus
         end
@@ -198,6 +220,52 @@ function translate_sequences(df::DataFrame)::DataFrame
 end
 
 """
+    generate_peptides_covering_variant(consensus_seq::String, variant_seq::String, aa_locus::Int, lengths::Vector{Int}) :: Tuple{Vector{String}, Vector{String}}
+
+Generates all possible 8-11mer peptides that cover the variant amino acid position from both
+consensus and variant sequences.
+
+# Arguments
+- consensus_seq::String: The consensus amino acid sequence
+- variant_seq::String: The variant amino acid sequence  
+- aa_locus::Int: The amino acid position of the variant
+- lengths::Vector{Int}: Peptide lengths to generate (should be [8,9,10,11])
+
+# Returns
+- A tuple of (consensus_peptides, variant_peptides) vectors
+"""
+function generate_peptides_covering_variant(consensus_seq::String, variant_seq::String, aa_locus::Int, lengths::Vector{Int})::Tuple{Vector{String}, Vector{String}}
+    consensus_peptides = String[]
+    variant_peptides = String[]
+    
+    for len in lengths
+        # Generate all possible peptides of this length that cover the variant position
+        # from the consensus sequence
+        for i in 1:(length(consensus_seq) - len + 1)
+            start_pos = i
+            end_pos = i + len - 1
+            if start_pos ≤ aa_locus ≤ end_pos
+                consensus_peptide = consensus_seq[start_pos:end_pos]
+                push!(consensus_peptides, consensus_peptide)
+            end
+        end
+        
+        # Generate all possible peptides of this length that cover the variant position
+        # from the variant sequence
+        for i in 1:(length(variant_seq) - len + 1)
+            start_pos = i
+            end_pos = i + len - 1
+            if start_pos ≤ aa_locus ≤ end_pos
+                variant_peptide = variant_seq[start_pos:end_pos]
+                push!(variant_peptides, variant_peptide)
+            end
+        end
+    end
+    
+    return (consensus_peptides, variant_peptides)
+end
+
+"""
     add_peptides_columns!(df::DataFrame, 
                           relative_locus_col::Symbol, 
                           consensus_col::Symbol, 
@@ -205,7 +273,7 @@ end
                           substr_lengths::Vector{Int}) :: DataFrame
 
 Generates peptides from both consensus and variant amino acid sequences and flattens
-the data into a new DataFrame with corresponding annotations.
+the data into a new DataFrame with corresponding annotations, adjusting for indels.
 
 # Arguments
 - df::DataFrame: Input DataFrame after translate_sequences.
@@ -231,22 +299,85 @@ function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol
     )
 
     for row in eachrow(df)
-        cps = generate_peptides(row[cs], row.AA_Locus, lens)
-        vps = generate_peptides(row[vs], row.AA_Locus, lens)
-
-        if length(cps) == length(vps)
-            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Consensus_AA_sequence)) ? row.Consensus_AA_sequence[row.AA_Locus] : "?"
-            variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Variant_AA_sequence)) ? row.Variant_AA_sequence[row.AA_Locus] : "?"
-
-            change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
-            base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
-
-            for (i, (c, v)) in enumerate(zip(cps, vps))
-                label = "$(base)_$(i)"
-                push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
+        # Check if this is an indel (consensus and variant nucleotides have different lengths)
+        is_indel = length(row.Consensus) != length(row.Variant)
+        
+        if is_indel
+            # For indels, we need to handle the affected region differently
+            # Calculate the size difference to determine the affected amino acid range
+            nt_diff = abs(length(row.Variant) - length(row.Consensus))
+            aa_diff = ceil(Int, nt_diff / 3)  # Number of amino acids potentially affected
+            
+            # Generate consensus peptides from original sequence covering the variant locus
+            cps, _ = generate_peptides_covering_variant(row[cs], row[cs], row.AA_Locus, lens)
+            
+            # For variant peptides, we need to cover a broader region that includes the entire affected area
+            # Start from the variant locus and extend by the amino acid difference
+            extended_start = max(1, row.AA_Locus - aa_diff)
+            extended_end = min(length(row[vs]), row.AA_Locus + aa_diff)
+            
+            # Generate all 8-11mers that cover any part of the extended affected region
+            vps = String[]
+            for aa_pos in extended_start:extended_end
+                for len in lens
+                    for start_pos in max(1, aa_pos - len + 1):min(length(row[vs]) - len + 1, aa_pos)
+                        if start_pos + len - 1 <= length(row[vs])
+                            peptide = row[vs][start_pos:start_pos + len - 1]
+                            if !(peptide in vps)  # Avoid duplicates
+                                push!(vps, peptide)
+                            end
+                        end
+                    end
+                end
             end
         else
-            @warn "Mismatched peptide counts at Locus $(row.Locus). Skipping."
+            # For SNVs, use the existing logic
+            cps, vps = generate_peptides_covering_variant(row[cs], row[vs], row.AA_Locus, lens)
+        end
+
+        # Create consensus/variant peptide pairs
+        if is_indel
+            # For indels, create nucleotide position-based notation
+            if length(row.Consensus) > length(row.Variant)
+                # Deletion
+                deleted_length = length(row.Consensus) - length(row.Variant)
+                if deleted_length == 1
+                    # Single nucleotide deletion
+                    change_label = "nt$(row.Relative_Locus)del"
+                else
+                    # Multi-nucleotide deletion
+                    start_nt = row.Relative_Locus
+                    end_nt = start_nt + deleted_length - 1
+                    change_label = "nt$(start_nt)_$(end_nt)del"
+                end
+            else
+                # Insertion
+                inserted_length = length(row.Variant) - length(row.Consensus)
+                # For insertions, use flanking positions and show inserted sequence
+                pos1 = row.Relative_Locus - 1
+                pos2 = row.Relative_Locus
+                # Get the inserted sequence (what's in variant but not in consensus)
+                inserted_seq = row.Variant[length(row.Consensus)+1:end]
+                change_label = "nt$(pos1)_$(pos2)ins$(inserted_seq)"
+            end
+        else
+            # For SNVs, use the traditional amino acid substitution format
+            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Consensus_AA_sequence)) ? row.Consensus_AA_sequence[row.AA_Locus] : "?"
+            variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Variant_AA_sequence)) ? row.Variant_AA_sequence[row.AA_Locus] : "?"
+            change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
+        end
+        base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
+
+        # Add consensus peptides
+        for (i, c) in enumerate(cps)
+            label = "$(base)_C_$(i)"
+            push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, "", label))
+        end
+        
+        # Add variant peptides
+        for (i, v) in enumerate(vps)
+            label = "$(base)_V_$(i)"
+            push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, "", v, label))
         end
     end
 
@@ -256,10 +387,8 @@ end
 """
     separate_peptides(df::DataFrame) :: DataFrame
 
-Splits the flattened DataFrame into two rows per original row: one for the consensus
-peptide and one for the variant peptide.
-
-Only non-synonymous variants (where consensus and variant peptides differ) are retained.
+Processes the DataFrame containing consensus and variant peptides separately,
+filtering out peptides with stop codons and creating the final peptide list.
 
 # Arguments
 - df::DataFrame: Input DataFrame after add_peptides_columns!.
@@ -268,17 +397,17 @@ Only non-synonymous variants (where consensus and variant peptides differ) are r
 - A DataFrame with separate rows for consensus and variant peptides.
 """
 function separate_peptides(df::DataFrame)::DataFrame
-    # Retain only rows where the consensus peptide and variant peptide differ.
+    # Filter out rows with stop codons
     initial_rows = nrow(df)
     
-    dropped_df = filter(row -> row.Consensus_Peptide == row.Variant_Peptide ||
-                                occursin('*', row.Consensus_Peptide) ||
-                                occursin('*', row.Variant_Peptide), df)
+    dropped_df = filter(row -> 
+        (row.Consensus_Peptide != "" && occursin('*', row.Consensus_Peptide)) ||
+        (row.Variant_Peptide != "" && occursin('*', row.Variant_Peptide)), df)
     removed_loci = length(unique(dropped_df.Locus))
     
-    filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide &&
-                                !occursin('*', row.Consensus_Peptide) &&
-                                !occursin('*', row.Variant_Peptide), df)
+    filtered_df = filter(row -> 
+        (row.Consensus_Peptide == "" || !occursin('*', row.Consensus_Peptide)) &&
+        (row.Variant_Peptide == "" || !occursin('*', row.Variant_Peptide)), df)
     
     final_rows = nrow(filtered_df)
     removed_rows = initial_rows - final_rows
@@ -291,19 +420,21 @@ function separate_peptides(df::DataFrame)::DataFrame
     )
 
     for row in eachrow(filtered_df)
-        # Add consensus peptide row
-        push!(transformed_df, (
-            row.Locus,
-            row.Consensus_Peptide,
-            "$(row.Peptide_label)_C"
-        ))
-
-        # Add variant peptide row
-        push!(transformed_df, (
-            row.Locus,
-            row.Variant_Peptide,
-            "$(row.Peptide_label)_V"
-        ))
+        if row.Consensus_Peptide != ""
+            # This is a consensus peptide
+            push!(transformed_df, (
+                row.Locus,
+                row.Consensus_Peptide,
+                row.Peptide_label
+            ))
+        elseif row.Variant_Peptide != ""
+            # This is a variant peptide
+            push!(transformed_df, (
+                row.Locus,
+                row.Variant_Peptide,
+                row.Peptide_label
+            ))
+        end
     end
 
     return transformed_df
@@ -367,21 +498,68 @@ translated = translate_sequences(edited)
 translated[!, :AA_Locus] = ceil.(Int, translated[!, :Relative_Locus] ./ 3)
 
 
-# Remove loci with no amino acid change at the mutation position
+# Remove loci with no amino acid change anywhere in the sequence
 syn_loci = filter(row -> begin
-    locus = row.AA_Locus isa Int ? row.AA_Locus : tryparse(Int, row.AA_Locus)
-    if locus === nothing || locus < 1 || locus > min(length(row.Consensus_AA_sequence), length(row.Variant_AA_sequence))
-        false
+    # Check if this is an indel
+    is_indel = length(row.Consensus) != length(row.Variant)
+    
+    if is_indel
+        # For indels, check if any amino acid changes in the entire sequence
+        # This handles frameshifts that affect downstream amino acids
+        consensus_aa = row.Consensus_AA_sequence
+        variant_aa = row.Variant_AA_sequence
+        
+        # If sequences have different lengths, they definitely create changes
+        if length(consensus_aa) != length(variant_aa)
+            return false  # Not synonymous, has changes
+        end
+        
+        # Check if any amino acid position differs
+        for i in 1:min(length(consensus_aa), length(variant_aa))
+            if consensus_aa[i] != variant_aa[i]
+                return false  # Not synonymous, has changes
+            end
+        end
+        return true  # All amino acids same, is synonymous
     else
-        row.Consensus_AA_sequence[locus] == row.Variant_AA_sequence[locus]
+        # For SNVs, use the original logic - check only the variant position
+        locus = row.AA_Locus isa Int ? row.AA_Locus : tryparse(Int, row.AA_Locus)
+        if locus === nothing || locus < 1 || locus > min(length(row.Consensus_AA_sequence), length(row.Variant_AA_sequence))
+            false
+        else
+            row.Consensus_AA_sequence[locus] == row.Variant_AA_sequence[locus]
+        end
     end
 end, translated)
 filtered_loci = filter(row -> begin
-    locus = row.AA_Locus isa Int ? row.AA_Locus : tryparse(Int, row.AA_Locus)
-    if locus === nothing || locus < 1 || locus > min(length(row.Consensus_AA_sequence), length(row.Variant_AA_sequence))
-        false
+    # Check if this is an indel
+    is_indel = length(row.Consensus) != length(row.Variant)
+    
+    if is_indel
+        # For indels, check if any amino acid changes in the entire sequence
+        consensus_aa = row.Consensus_AA_sequence
+        variant_aa = row.Variant_AA_sequence
+        
+        # If sequences have different lengths, they definitely create changes
+        if length(consensus_aa) != length(variant_aa)
+            return true  # Has changes, not synonymous
+        end
+        
+        # Check if any amino acid position differs
+        for i in 1:min(length(consensus_aa), length(variant_aa))
+            if consensus_aa[i] != variant_aa[i]
+                return true  # Has changes, not synonymous
+            end
+        end
+        return false  # All amino acids same, is synonymous
     else
-        row.Consensus_AA_sequence[locus] != row.Variant_AA_sequence[locus]
+        # For SNVs, use the original logic - check only the variant position
+        locus = row.AA_Locus isa Int ? row.AA_Locus : tryparse(Int, row.AA_Locus)
+        if locus === nothing || locus < 1 || locus > min(length(row.Consensus_AA_sequence), length(row.Variant_AA_sequence))
+            false
+        else
+            row.Consensus_AA_sequence[locus] != row.Variant_AA_sequence[locus]
+        end
     end
 end, translated)
 println("Dropped $(nrow(syn_loci)) synonymous loci.")
