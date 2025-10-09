@@ -38,7 +38,7 @@ end
 # Helper function to run commands safely
 function safe_run(cmd::Cmd)
     try
-        run(cmd)
+        run(pipeline(cmd, stderr=devnull))
         return true
     catch
         return false
