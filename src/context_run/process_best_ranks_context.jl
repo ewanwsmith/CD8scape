@@ -105,6 +105,10 @@ try
 
     best_ranks = vcat(best_C, best_V)
     best_ranks.Peptide_label = [replace(strip(string(s)), r"_[^_]*$" => "") for s in best_ranks.Peptide_label]
+    # Create a cleaned label that removes trailing numeric peptide indices (e.g. _1, _2)
+    # and any remaining final token so we can form robust descriptions per Locus.
+    best_ranks.cleaned_label = [replace(string(s), r"_(\d+)$" => "") for s in best_ranks.Peptide_label]
+    best_ranks.cleaned_label = [replace(strip(string(s)), r"_$" => "") for s in best_ranks.cleaned_label]
     # Ensure HLA is included, then rename to Allele for matching
     rename!(best_ranks, Dict(:HLA => :Allele))
     best_ranks = select(best_ranks, :Locus, :Peptide_label, :Allele, :Best_EL_Rank, :Peptide_Type, Not([:Locus, :Peptide_label, :Allele, :Best_EL_Rank, :Peptide_Type]))
@@ -112,8 +116,25 @@ try
     best_ranks.Best_EL_Rank = [tryparse(Float64, strip(string(x))) === nothing ? missing : tryparse(Float64, strip(string(x))) for x in best_ranks.Best_EL_Rank]
 
     # Ensure description_roots is always defined before harmonic mean calculations
+    # Choose the most representative cleaned_label per Locus: use the modal value
+    # (most frequent); if there's a tie pick the longest label (prefer full region names).
+    function representative_label(arr)
+        # arr may contain non-strings; coerce to String
+        strs = string.(arr)
+        counts = Dict{String,Int}()
+        for s in strs
+            counts[s] = get(counts, s, 0) + 1
+        end
+        # find maximal count
+        maxc = maximum(values(counts))
+        candidates = [k for (k,v) in counts if v == maxc]
+        # choose the longest candidate (break ties deterministically)
+        sort(candidates, by = x -> (-length(x), x))[1]
+    end
+
     description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-        (; Locus = sdf.Locus[1], Description = shared_prefix(sdf.Peptide_label))
+        rep = representative_label(sdf.cleaned_label)
+        (; Locus = sdf.Locus[1], Description = rep)
     end
 
     println("Calculating harmonic mean best ranks (HMBR) for each locus...")
