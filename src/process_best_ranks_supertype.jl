@@ -352,9 +352,25 @@ if !isempty(best_ranks)
     # Fold change V/C
     pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
 
+    # Add log2-transformed fold change (safe handling for missing/non-positive values)
+    function safe_log2(x)
+        if ismissing(x)
+            return missing
+        end
+        xf = tryparse(Float64, string(x))
+        if xf === nothing
+            return missing
+        end
+        if xf <= 0
+            return missing
+        end
+        return log2(xf)
+    end
+    pivot_df.foldchange_HMBR_log2 = [safe_log2(v) for v in pivot_df.foldchange_HMBR]
+
     # Attach Description and reorder columns (keep original output schema)
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-    pivot_df = select(pivot_df, :Locus, :Description, :HMBR_C, :HMBR_V, :foldchange_HMBR)
+    pivot_df = select(pivot_df, :Locus, :Description, :HMBR_C, :HMBR_V, :foldchange_HMBR, :foldchange_HMBR_log2)
 
     # Save results
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv")
