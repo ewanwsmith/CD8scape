@@ -92,14 +92,29 @@ function percentile_rank_log2(value_raw, distribution_log2)
 end
 
 # Calculate and append percentiles
-percentiles = [percentile_rank_log2(val, context_foldchanges) for val in observed_df[:, foldchange_col]]
+# Compute log2-transformed fold-change column once and reuse it for percentile calculation
+observed_log2 = [safe_log2(val) for val in observed_df[:, foldchange_col]]
+observed_df[:, "foldchange_HMBR_log2"] = observed_log2
+percentiles = [
+    begin
+        # use precomputed log2 value for percentile calculation to avoid re-transforming
+        val_log2 = observed_log2[i]
+        vals = collect(skipmissing(context_foldchanges))
+        if isempty(vals) || ismissing(val_log2)
+            NaN
+        else
+            n_below = count(x -> x <= val_log2, vals)
+            100 * n_below / length(vals)
+        end
+    end for i in 1:length(observed_log2)
+]
 observed_df[:, "foldchange_percentile"] = percentiles
 
 # Print results for each locus (show raw and log2)
 for row in eachrow(observed_df)
     locus_desc = haskey(row, "Description") ? row["Description"] : "Unknown"
     raw = row[foldchange_col]
-    lg = safe_log2(raw)
+    lg = row["foldchange_HMBR_log2"]
     pct = row["foldchange_percentile"]
     println("Locus: $(locus_desc) Fold change = $(raw), log2 = $(lg), Percentile = $(pct)%")
 end
