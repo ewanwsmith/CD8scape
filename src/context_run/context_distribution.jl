@@ -51,8 +51,24 @@ end
 context_df = CSV.read(context_file, DataFrame)
 observed_df = CSV.read(observed_file, DataFrame)
 
-# Extract context fold changes
-context_foldchanges = context_df[:, foldchange_col]
+# Extract context fold changes and transform with log2
+function safe_log2(x)
+    if ismissing(x)
+        return missing
+    end
+    xf = tryparse(Float64, string(x))
+    if xf === nothing
+        return missing
+    end
+    if xf <= 0
+        println("Warning: non-positive fold change encountered (value=$(x)); treating as missing in log2 transform.")
+        return missing
+    end
+    return log2(xf)
+end
+
+context_foldchanges_raw = context_df[:, foldchange_col]
+context_foldchanges = [safe_log2(v) for v in context_foldchanges_raw]
 
 # If context is empty, skip percentile step and output observed_df as simulated output
 if isempty(context_foldchanges)
@@ -63,19 +79,29 @@ if isempty(context_foldchanges)
 end
 
 # Function to calculate percentile
-function percentile_rank(value, distribution)
-    n_below = count(x -> !ismissing(x) && x <= value, distribution)
-    return 100 * n_below / length(distribution)
+# Percentiles are computed on the log2-transformed fold changes (inclusive definition)
+function percentile_rank_log2(value_raw, distribution_log2)
+    # transform observed value
+    val = safe_log2(value_raw)
+    vals = collect(skipmissing(distribution_log2))
+    if isempty(vals) || ismissing(val)
+        return NaN
+    end
+    n_below = count(x -> x <= val, vals)
+    return 100 * n_below / length(vals)
 end
 
 # Calculate and append percentiles
-percentiles = [percentile_rank(val, context_foldchanges) for val in observed_df[:, foldchange_col]]
+percentiles = [percentile_rank_log2(val, context_foldchanges) for val in observed_df[:, foldchange_col]]
 observed_df[:, "foldchange_percentile"] = percentiles
 
-# Print results for each locus
+# Print results for each locus (show raw and log2)
 for row in eachrow(observed_df)
     locus_desc = haskey(row, "Description") ? row["Description"] : "Unknown"
-    println("Locus: $(locus_desc) Fold change = $(row[foldchange_col]), Percentile = $(row["foldchange_percentile"])%")
+    raw = row[foldchange_col]
+    lg = safe_log2(raw)
+    pct = row["foldchange_percentile"]
+    println("Locus: $(locus_desc) Fold change = $(raw), log2 = $(lg), Percentile = $(pct)%")
 end
 
 # Save updated DataFrame

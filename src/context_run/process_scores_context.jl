@@ -61,9 +61,11 @@ try
         end
     end
 
-    # Join NetMHCpan output with peptide labels on Peptide column
-    joined_df = leftjoin(netmhc_df, labels_df, on=["Peptide"])
+    # Join peptide labels with NetMHCpan output on Peptide column
+    # Use labels as the primary table so the output has one row per peptide label
+    joined_df = leftjoin(labels_df, netmhc_df, on=["Peptide"])
     println("[process_scores_context] Joined columns: ", names(joined_df))
+    println("[process_scores_context] Resulting rows after join: ", nrow(joined_df))
 
     # If output DataFrame or CSV uses Description_Root, rename to Description
     if "Description_Root" in names(joined_df)

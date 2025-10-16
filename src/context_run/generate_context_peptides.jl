@@ -25,6 +25,9 @@ using ArgParse
 using CSV, DataFrames
 using Random
 using FilePathsBase
+# load variant expansion helper
+include(joinpath("..", "variant_expansion.jl"))
+using .VariantExpansion
 
 # Define codon to amino acid translation dictionary
 const CODON_DICT = Dict(
@@ -202,24 +205,50 @@ function main()
         Peptide_label = String[]
     )
 
+    # saturation log path
+    saturation_log = joinpath(outdir, "saturation_log.csv")
+    skipped_saturated = 0
+
     # Generate peptides and labels for each row in joined data
     for row in eachrow(joined)
+        # For context-run we have a single introduced variant per row. Use expand_sites to decide whether to
+        # generate peptides for this window. Build a single Site with the consensus base and the variant base.
+        # sites are DNA-level here: use the relative locus to pick the base
+    ref_base = string(row.Consensus_sequence[row.Relative_Locus])
+    alt_base = string(row.Variant_sequence[row.Relative_Locus])
+        site = Site(row.Relative_Locus, ref_base, [alt_base], nothing)
+
+        combos = expand_sites([site]; max_alts_per_site=1, max_combinations=10000, sample_on_saturate=true, saturation_log=saturation_log, stop_on_saturation=true)
+        if isempty(combos)
+            # saturated and policy says stop -> skip this window
+            skipped_saturated += 1
+            continue
+        end
+
+        # Map combos (each is a Vector{String} of length 1) to peptides. Each combo choice is either ref_base or alt_base.
+        # For each choice present among combos, include the corresponding peptide (consensus or variant)
+        choices = Set([c[1] for c in combos])
         cps = generate_peptides(row.Consensus_AA_sequence, row.AA_Locus, substr_lengths)
         vps = generate_peptides(row.Variant_AA_sequence, row.AA_Locus, substr_lengths)
 
         # Only proceed if consensus and variant peptide counts match
         if length(cps) == length(vps)
-            # Extract amino acids at the mutation locus for labeling
             consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Consensus_AA_sequence)) ? row.Consensus_AA_sequence[row.AA_Locus] : "?"
             variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Variant_AA_sequence)) ? row.Variant_AA_sequence[row.AA_Locus] : "?"
 
             change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
             base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
 
-            # Label and store each peptide pair
+            # If both choices are present, include both peptides (dedupe later)
             for (i, (c, v)) in enumerate(zip(cps, vps))
-                label = "$(base)_$(i)"
-                push!(peptides_df, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
+                if ref_base in choices
+                    label = "$(base)_$(i)"
+                    push!(peptides_df, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
+                end
+                if alt_base in choices
+                    label = "$(base)_$(i)"
+                    push!(peptides_df, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
+                end
             end
         end
     end
