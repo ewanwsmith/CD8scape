@@ -24,10 +24,12 @@ function parse_arguments()
             args["folder"] = ARGS[i + 1]
         elseif arg == "--mode"
             args["mode"] = ARGS[i + 1]
+        elseif arg == "--peptides"
+            args["peptides"] = ARGS[i + 1]
         end
     end
     if !haskey(args, "folder") || !haskey(args, "mode")
-        error("Usage: ./run_netMHCpan_context.jl --folder /path/to/data --mode panel|supertype")
+        error("Usage: ./run_netMHCpan_context.jl --folder /path/to/data --mode panel|supertype [--peptides /path/to/pepfile]")
     end
     return args
 end
@@ -85,21 +87,37 @@ function get_netMHCpan_path()
     error("No valid NETMHCPAN file path found in settings.txt.")
 end
 
-function run_netmhcpan(cmd, xlsfile_path)
+function run_netmhcpan(cmd, xlsfile_path, stdout_log::AbstractString, stderr_log::AbstractString)
     println("Running NetMHCpan with command:")
     println(cmd)
 
+    # Ensure parent dirs exist for log files
     try
-        run(cmd)
+        open(stdout_log, "w") do io end
+        open(stderr_log, "w") do io end
+    catch
+        println("Warning: unable to create log files: $stdout_log or $stderr_log")
+    end
+
+    try
+        open(stdout_log, "w") do out_io
+            open(stderr_log, "w") do err_io
+                # Run the command and stream stdout/stderr into the log files
+                run(pipeline(cmd, stdout=out_io, stderr=err_io))
+            end
+        end
+
         if isfile(xlsfile_path)
             println("NetMHCpan output found at $xlsfile_path")
         else
-            error("ERROR: NetMHCpan did not create the expected output file.")
+            error("ERROR: NetMHCpan did not create the expected output file. Check logs: $stdout_log and $stderr_log")
         end
         println("NetMHCpan completed successfully.")
     catch e
+        # Print a brief diagnostic with log locations and rethrow so the caller can decide to retry
         println("Error running NetMHCpan: ", e)
-        exit(1)
+        println("See NetMHCpan logs: stdout -> $stdout_log ; stderr -> $stderr_log")
+        rethrow(e)
     end
 end
 
@@ -119,7 +137,7 @@ function main()
         open(testfile, "w") do io
             write(io, "test")
         end
-        rm(testfile)
+    Base.rm(testfile)
     catch
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
@@ -343,7 +361,10 @@ function main()
         alleles_str = join(chunk, ",")
         chunk_out = joinpath(folder, "netMHCpan_output_chunk$(i).tsv")
         cmd = `$netmhcpan -p $peptides_file -xls -a $alleles_str -xlsfile $chunk_out`
-        run_netmhcpan(cmd, chunk_out)
+        # Per-chunk logs
+        chunk_stdout_log = joinpath(folder, "netMHCpan_chunk$(i).out")
+        chunk_stderr_log = joinpath(folder, "netMHCpan_chunk$(i).err")
+        run_netmhcpan(cmd, chunk_out, chunk_stdout_log, chunk_stderr_log)
         if isfile(chunk_out)
             push!(temp_files, chunk_out)
         end
@@ -361,7 +382,7 @@ function main()
                     end
                 end
             end
-            rm(temp_file)
+            Base.rm(temp_file)
         end
     end
     println("NetMHCpan outputs joined to $xlsfile_path")

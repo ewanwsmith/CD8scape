@@ -156,7 +156,7 @@ function main()
         open(test_file, "w") do io
             write(io, "test")
         end
-        rm(test_file)
+    Base.rm(test_file)
     catch e
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
@@ -289,7 +289,7 @@ function main()
                     end
                 end
             end
-            rm(temp_file)
+            Base.rm(temp_file)
         end
     end
     println("NetMHCpan outputs joined to $xlsfile_path")

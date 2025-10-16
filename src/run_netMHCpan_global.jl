@@ -130,7 +130,7 @@ function main()
         open(test_file, "w") do io
             write(io, "test")
         end
-        rm(test_file)
+    Base.rm(test_file)
     catch e
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
