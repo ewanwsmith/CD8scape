@@ -131,6 +131,24 @@ if !isempty(best_ranks)
     # Calculate fold change (Derived (_V) / Ancestral (_C))
     pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
 
+    # Add a log2-transformed fold change column (safe: converts non-positive or missing to missing)
+    function safe_log2(x)
+        if ismissing(x)
+            return missing
+        end
+        xf = tryparse(Float64, string(x))
+        if xf === nothing
+            return missing
+        end
+        if xf <= 0
+            return missing
+        end
+        return log2(xf)
+    end
+    # Precompute the log2 values once and reuse
+    observed_log2 = [safe_log2(v) for v in pivot_df.foldchange_HMBR]
+    pivot_df.foldchange_HMBR_log2 = observed_log2
+
     # Compute shared Description root per Locus
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
 

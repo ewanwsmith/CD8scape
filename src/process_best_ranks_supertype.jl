@@ -366,7 +366,9 @@ if !isempty(best_ranks)
         end
         return log2(xf)
     end
-    pivot_df.foldchange_HMBR_log2 = [safe_log2(v) for v in pivot_df.foldchange_HMBR]
+    # Precompute log2 values once and reuse
+    observed_log2 = [safe_log2(v) for v in pivot_df.foldchange_HMBR]
+    pivot_df.foldchange_HMBR_log2 = observed_log2
 
     # Attach Description and reorder columns (keep original output schema)
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
