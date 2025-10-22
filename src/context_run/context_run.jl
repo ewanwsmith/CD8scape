@@ -236,26 +236,28 @@ end
 function atomic_write_csv(path::AbstractString, df::DataFrame)
     dir = dirname(path)
     base = basename(path)
-    # Use mktemp in the target directory for a secure temp file and reliable rename
+    # Ensure target directory exists
     try
         mkpath(dir)
     catch
         # ignore
     end
-    tmp_io, tmp_path = Base.mktemp(suffix=".tmp", dir=dir)
+
+    # Create a temporary filename in the same directory to allow an atomic rename.
+    # Use process id and timestamp to minimise collisions.
+    tmp_path = joinpath(dir, "$(base).tmp.$(getpid()).$(Int(time()*1000))")
     try
-        close(tmp_io) # CSV.write will open the file itself
+        # Write directly to the temporary path, then atomically rename to final path.
         CSV.write(tmp_path, df)
-        # Use rename for atomic move
-    Base.rename(tmp_path, path)
+        Base.rename(tmp_path, path)
     catch e
         # try cleanup of tmp_path if it still exists
-            try
-                if isfile(tmp_path)
-                    Base.rm(tmp_path)
-                end
-            catch
+        try
+            if isfile(tmp_path)
+                Base.rm(tmp_path)
             end
+        catch
+        end
         rethrow(e)
     end
 end
@@ -269,16 +271,19 @@ function main()
         exit(1)
     end
 
+
     folder_path = ARGS[1]
     frames_path = joinpath(folder_path, "frames.csv")
+
+    # Define attempt before any references to it
+    attempt = 1
 
     if !isfile(frames_path)
         println("Error: frames.csv not found in the provided folder path: $folder_path")
         exit(1)
     end
-
     # Default number of loci
-        n_loci = 1000
+    n_loci = 1000
     mode = "panel"
     override = false
     seed = 1320
@@ -287,6 +292,7 @@ function main()
     # Parse additional arguments
     for (i, arg) in enumerate(ARGS)
         if arg == "--n_loci" && i < length(ARGS)
+                println("[DIAG] Skipping cache write: context_peptides.pep missing for attempt $attempt.")
             try
                 n_loci = parse(Int, ARGS[i + 1])
             catch
@@ -295,10 +301,12 @@ function main()
             end
         elseif arg == "--mode" && i < length(ARGS)
             mode = ARGS[i + 1]
+                println("[DIAG] Skipping cache write: all loci already processed for attempt $attempt.")
             if mode ∉ ["panel", "supertype"]
                 println("Error: Invalid value for --mode.")
                 exit(1)
             end
+                println("[DIAG] Skipping cache write: error filtering duplicates for attempt $attempt.")
         elseif arg == "--verbose" || arg == "-v"
             verbose = true
         elseif arg == "--override"
@@ -308,6 +316,7 @@ function main()
                 seed = parse(Int, ARGS[i + 1])
             catch
                 println("Error: Invalid value for --seed.")
+                println("[DIAG] Skipping cache write: error in generation for attempt $attempt.")
                 exit(1)
             end
         end
@@ -315,6 +324,7 @@ function main()
 
     # ...existing code...
     generate_script = joinpath(@__DIR__, "generate_context_peptides.jl")
+                println("[DIAG] Skipping cache write: error reading peptide file for attempt $attempt.")
 
     # Make max attempts configurable (default increased to 50)
     max_attempts = 200
@@ -330,6 +340,7 @@ function main()
     end
 
     attempt = 1
+                    println("[DIAG] Skipping cache write: NetMHCpan run failed for attempt $attempt.")
     current_n = n_loci
 
     # Prepare a persistent cache directory to store per-attempt outputs so we don't re-run
@@ -339,6 +350,7 @@ function main()
     cache_dir = joinpath(folder_path, "context_cache")
     mkpath(cache_dir)
 
+                    println("[DIAG] Skipping cache write: NetMHCpan did not produce output for attempt $attempt.")
     master_hm_df = DataFrame()
     master_best_df = DataFrame()
 
@@ -352,8 +364,8 @@ function main()
             println("Found cached results for attempt $attempt at $attempt_dir — reusing outputs")
         else
             mkpath(attempt_dir)
-            
-                # Copy alleles file (case-insensitive) from the main folder into the attempt dir
+            # Copy alleles.txt only if mode is panel
+            if mode == "panel"
                 try
                     alleles_candidates = filter(f -> lowercase(basename(f)) == "alleles.txt", readdir(folder_path; join=true))
                     if !isempty(alleles_candidates)
@@ -364,12 +376,30 @@ function main()
                             println("Copied alleles file to attempt directory: $(alleles_dest)")
                         end
                     else
-                        # not fatal here; run_netMHCpan_context will warn if missing
                         println("Note: no alleles.txt found in main folder ($folder_path); NetMHCpan runner may skip alleles.")
                     end
                 catch e
                     println("Warning: could not copy alleles.txt into attempt dir: $e")
                 end
+            end
+            # Always copy supertype_panel.csv if mode is supertype
+            if mode == "supertype"
+                try
+                    supertype_src_candidates = filter(f -> lowercase(basename(f)) == "supertype_panel.csv", readdir(folder_path; join=true))
+                    if !isempty(supertype_src_candidates)
+                        supertype_src = first(supertype_src_candidates)
+                        supertype_dest = joinpath(attempt_dir, "supertype_panel.csv")
+                        if !isfile(supertype_dest)
+                            cp(supertype_src, supertype_dest)
+                            println("Copied supertype_panel.csv to attempt directory: $(supertype_dest)")
+                        end
+                    else
+                        println("Warning: no supertype_panel.csv found in main folder ($folder_path); supertype run may fail.")
+                    end
+                catch e
+                    println("Warning: could not copy supertype_panel.csv into attempt dir: $e")
+                end
+            end
             # Copy frames.csv into attempt directory so generate script can operate there
             dest_frames = joinpath(attempt_dir, "frames.csv")
             try
@@ -462,9 +492,26 @@ function main()
             try
                 if isfile(master_cache_file)
                     cached_df = CSV.read(master_cache_file, DataFrame)
-                    println("Loaded peptide NetMHCpan cache with $(nrow(cached_df)) rows from $master_cache_file")
+                    # Normalize peptide column name so downstream code can rely on :Peptide
+                    try
+                        pcol = nothing
+                        for nm in names(cached_df)
+                            try
+                                if lowercase(String(nm)) == "peptide"
+                                    pcol = nm; break
+                                end
+                            catch
+                            end
+                        end
+                        if pcol !== nothing && pcol != :Peptide
+                            rename!(cached_df, pcol => :Peptide)
+                        end
+                    catch e
+                        println("[DIAG] Warning: could not normalize peptide column name: $e")
+                    end
+                    println("[DIAG] Loaded peptide NetMHCpan cache with $(nrow(cached_df)) rows from $master_cache_file")
                 else
-                    # empty DataFrame placeholder; will be populated after new runs
+                    println("[DIAG] No peptide NetMHCpan cache found at $master_cache_file; starting with empty cache.")
                     cached_df = DataFrame()
                 end
             catch e
@@ -484,10 +531,35 @@ function main()
                 continue
             end
 
-            # Find which peptides are missing from the cache
+            # Find which peptides are missing from the cache. Be robust to column name types
             cached_peptides = String[]
-            if nrow(cached_df) > 0 && :Peptide in names(cached_df)
-                cached_peptides = unique(String.(cached_df.Peptide))
+            peptide_col = nothing
+            if nrow(cached_df) > 0
+                for nm in names(cached_df)
+                    try
+                        if lowercase(String(nm)) == "peptide"
+                            peptide_col = nm
+                            break
+                        end
+                    catch
+                        # ignore coercion errors
+                    end
+                end
+                if peptide_col !== nothing
+                    try
+                        cached_peptides = unique(String.(cached_df[!, peptide_col]))
+                    catch e
+                        println("[DIAG] Warning: could not coerce cached peptide column to String: $e")
+                        cached_peptides = String[]
+                    end
+                end
+            end
+            # Diagnostic: print a sample of attempt_peps and cached_peptides for debugging
+            println("[DIAG] Sample attempt_peps (first 5): ", join(first(attempt_peps, min(5, length(attempt_peps))), ", "))
+            if !isempty(cached_peptides)
+                println("[DIAG] Sample cached_df.Peptide (first 5): ", join(first(cached_peptides, min(5, length(cached_peptides))), ", "))
+            else
+                println("[DIAG] Sample cached_df.Peptide (first 5): <none found> (available columns: $(names(cached_df)))")
             end
             missing_peptides = setdiff(attempt_peps, cached_peptides)
 
@@ -539,6 +611,7 @@ function main()
                 if isfile(new_processed)
                     try
                         df_new = CSV.read(new_processed, DataFrame)
+                        println("[DIAG] Attempt processed output: $(nrow(df_new)) rows, sample Peptide: ", join(first(df_new.Peptide, min(5, nrow(df_new))), ", "))
                         if nrow(cached_df) == 0
                             cached_df = df_new
                         else
@@ -546,24 +619,68 @@ function main()
                             combined = vcat(cached_df, df_new)
                             cached_df = unique(combined)
                         end
+                        println("[DIAG] Master cache after append: $(nrow(cached_df)) rows, sample Peptide: ", join(first(cached_df.Peptide, min(5, nrow(cached_df))), ", "))
                         # Persist updated master cache
+                        # Attempt to persist updated master cache with good diagnostics and a safe fallback.
+                        lockdir = joinpath(folder_path, ".peptide_cache_lock")
+                        got = false
                         try
-                            lockdir = joinpath(folder_path, ".peptide_cache_lock")
                             got = lock_acquire(lockdir; timeout_seconds=30)
-                            if !got
-                                println("Warning: could not acquire lock for master peptide cache; will try non-atomic write")
+                        catch e
+                            println("Warning: lock_acquire raised an exception: $e")
+                            @show catch_backtrace = catch_backtrace()
+                            got = false
+                        end
+
+                        if !got
+                            println("Warning: could not acquire lock for master peptide cache; attempting non-atomic write to $master_cache_file")
+                            try
                                 CSV.write(master_cache_file, cached_df)
-                            else
+                                println("Appended $(nrow(df_new)) processed rows to master peptide cache (non-atomic) at $master_cache_file")
+                            catch e
+                                println("ERROR: non-atomic CSV.write failed for $master_cache_file: $e")
+                                showerror(stderr, e)
+                                println()
+                            end
+                        else
+                            # We have the lock: try atomic write, but on failure fall back to non-atomic write and always release lock.
+                            try
                                 try
                                     atomic_write_csv(master_cache_file, cached_df)
-                                finally
+                                    println("Appended $(nrow(df_new)) processed rows to master peptide cache (atomic) at $master_cache_file")
+                                catch e
+                                    println("ERROR: atomic_write_csv failed for $master_cache_file: $e")
+                                    showerror(stderr, e)
+                                    println()
+                                    println("Falling back to non-atomic CSV.write for $master_cache_file")
+                                    try
+                                        CSV.write(master_cache_file, cached_df)
+                                        println("Appended $(nrow(df_new)) processed rows to master peptide cache (fallback non-atomic) at $master_cache_file")
+                                    catch e2
+                                        println("ERROR: fallback non-atomic CSV.write also failed for $master_cache_file: $e2")
+                                        showerror(stderr, e2)
+                                        println()
+                                    end
+                                end
+                            finally
+                                try
                                     lock_release(lockdir)
+                                catch e
+                                    println("Warning: lock_release raised an exception: $e")
                                 end
                             end
-                            println("Appended $(nrow(df_new)) processed rows to master peptide cache ($master_cache_file)")
-                        catch e
-                            # If the environment requests directory-lock preference, log a short note.
-                            println("Using directory-lock to update master peptide cache (default). To request descriptor-based locking set CD8S_USE_FLOCK=1 and ensure your Julia build supports flock.")
+                        end
+
+                        # Confirm cache file exists and print row count
+                        if isfile(master_cache_file)
+                            try
+                                tmp_df = CSV.read(master_cache_file, DataFrame)
+                                println("[DIAG] Confirmed cache file written: $(nrow(tmp_df)) rows at $master_cache_file")
+                            catch e
+                                println("[DIAG] WARNING: cache file exists but could not be read: $e")
+                            end
+                        else
+                            println("[DIAG] ERROR: Cache file $master_cache_file was not written!")
                         end
                     catch e
                         println("Warning: could not read processed output for missing peptides: $e")
@@ -576,31 +693,50 @@ function main()
             end
 
                 # Build attempt-level processed output by selecting cached rows for the peptides in this attempt
-            try
+                try
                 if nrow(cached_df) == 0
                     println("Warning: master peptide cache is empty after NetMHCpan step for attempt $attempt. No processed results available.")
                 end
-                # Select rows where Peptide is in attempt_peps
-                attempt_rows = filter(row -> row.Peptide in attempt_peps, cached_df)
-                CSV.write(joinpath(attempt_dir, "context_processed_netMHCpan_output.csv"), attempt_rows)
-                    # Diagnostic: report how many rows were written and how many labeled rows will be produced after joining
-                    written = nrow(attempt_rows)
-                    labeled_rows = "unknown"
-                    try
-                        # if labels file exists, compute exact joined row count to mirror process_scores_context.jl behavior
-                        labf = joinpath(attempt_dir, "context_peptides_labels.csv")
-                        if isfile(labf)
-                            labdf = CSV.read(labf, DataFrame)
-                            # perform a left join like process_scores_context.jl and count resulting rows
-                            joined_temp = leftjoin(attempt_rows, labdf, on=["Peptide"])  # may expand rows
-                            labeled_rows = nrow(joined_temp)
-                        else
-                            labeled_rows = 0
+                # Select rows where Peptide is in attempt_peps (robust to column name casing/types)
+                attempt_rows = DataFrame()
+                if nrow(cached_df) > 0
+                    # ensure peptide_col is set (may have been set earlier)
+                    if peptide_col === nothing
+                        for nm in names(cached_df)
+                            try
+                                if lowercase(String(nm)) == "peptide"
+                                    peptide_col = nm; break
+                                end
+                            catch
+                            end
                         end
-                    catch e
-                        labeled_rows = "unknown (error: $(e))"
                     end
-                    println("Wrote attempt processed NetMHCpan output with $written rows to attempt directory: $attempt_dir; estimated labeled rows after join: $labeled_rows")
+                    if peptide_col !== nothing
+                        attempt_rows = filter(row -> row[peptide_col] in attempt_peps, cached_df)
+                    else
+                        println("[DIAG] WARNING: could not find Peptide column in master cache; producing empty attempt_rows")
+                    end
+                end
+                println("[DIAG] Attempt output for scoring: $(nrow(attempt_rows)) rows, sample Peptide: ", (nrow(attempt_rows)>0 ? join(first(attempt_rows[!, peptide_col], min(5, nrow(attempt_rows))), ", ") : "<none>"))
+                CSV.write(joinpath(attempt_dir, "context_processed_netMHCpan_output.csv"), attempt_rows)
+                # Diagnostic: report how many rows were written and how many labeled rows will be produced after joining
+                written = nrow(attempt_rows)
+                labeled_rows = "unknown"
+                try
+                    # if labels file exists, compute exact joined row count to mirror process_scores_context.jl behavior
+                    labf = joinpath(attempt_dir, "context_peptides_labels.csv")
+                    if isfile(labf)
+                        labdf = CSV.read(labf, DataFrame)
+                        # perform a left join like process_scores_context.jl and count resulting rows
+                        joined_temp = leftjoin(attempt_rows, labdf, on=["Peptide"])  # may expand rows
+                        labeled_rows = nrow(joined_temp)
+                    else
+                        labeled_rows = 0
+                    end
+                catch e
+                    labeled_rows = "unknown (error: $(e))"
+                end
+                println("Wrote attempt processed NetMHCpan output with $written rows to attempt directory: $attempt_dir; estimated labeled rows after join: $labeled_rows")
             catch e
                 println("Error constructing attempt processed NetMHCpan output for attempt $attempt: $e")
                 exit(1)
@@ -646,13 +782,30 @@ function main()
         end
 
         # Inspect resulting harmonic mean output for this attempt and merge passed loci into master tables
+
         attempt_hm_file = joinpath(attempt_dir, "context_harmonic_mean_best_ranks.csv")
         attempt_best_file = joinpath(attempt_dir, "context_best_ranks.csv")
         attempt_passed = 0
+        attempt_total = 0
+        attempt_filtered = 0
         if isfile(attempt_hm_file)
             try
                 df_hm = CSV.read(attempt_hm_file, DataFrame)
                 attempt_passed = nrow(df_hm)
+                # Try to get the total loci before filtering (if available)
+                # This requires reading the unfiltered file if it exists, otherwise estimate from best ranks
+                if isfile(attempt_best_file)
+                    try
+                        df_best = CSV.read(attempt_best_file, DataFrame)
+                        attempt_total = length(unique(df_best.Locus))
+                    catch
+                        attempt_total = attempt_passed
+                    end
+                else
+                    attempt_total = attempt_passed
+                end
+                attempt_filtered = attempt_total - attempt_passed
+                println("Attempt $attempt: $attempt_filtered loci filtered out as non-binding (of $attempt_total total loci in attempt)")
 
                 # If master is empty just take df_hm, otherwise append only new Locus rows
                 if nrow(master_hm_df) == 0
@@ -752,7 +905,13 @@ function main()
         println("Note: no best-rank rows were aggregated; no aggregated best ranks file written. Expected path would have been: $best_out")
     end
 
-
+    try
+        main()
+    catch e
+        println("ERROR: ", e)
+        Base.show_backtrace(stderr, catch_backtrace())
+        rethrow(e)
+    end
 end
 
 main()
