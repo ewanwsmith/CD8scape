@@ -38,22 +38,31 @@ function find_best_ranks(df, suffix)
 end
 
 function shared_prefix(strings)
+    # Remove trailing final token after the last underscore (e.g. _1, _A)
     cleaned = [replace(s, r"_([^_]*)$" => "") for s in strings]
     if isempty(cleaned)
         return ""
     end
-    prefix = cleaned[1]
+    # Work with arrays of characters to avoid 1-based string indexing pitfalls
+    prefix_chars = collect(cleaned[1])
     for s in cleaned[2:end]
-        minlen = min(length(prefix), length(s))
-        i = 1
-        while i <= minlen && prefix[i] == s[i]
-            i += 1
+        s_chars = collect(s)
+        newlen = 0
+        for (i, (pc, sc)) in enumerate(zip(prefix_chars, s_chars))
+            if pc == sc
+                newlen = i
+            else
+                break
+            end
         end
-        prefix = prefix[1:i-1]
-        if isempty(prefix)
+        if newlen == 0
+            prefix_chars = Char[]
             break
+        else
+            prefix_chars = prefix_chars[1:newlen]
         end
     end
+    prefix = String(prefix_chars)
     prefix = replace(prefix, r"_$" => "")
     return prefix
 end
@@ -147,18 +156,41 @@ try
             wmap = Dict(String(a) => f for (a, f) in zip(freq_df.allele, freq_df.frequency))
 
             grouped = groupby(best_ranks, [:Locus, :Peptide_Type])
+            # Aggregate by pairing each row's allele weight with its Best_EL_Rank
             agg = combine(grouped) do sdf
                 alleles = normalize_allele.(string.(sdf.Allele))
-                ranks = collect(skipmissing(sdf.Best_EL_Rank))
-                weights = [get(wmap, String(a), missing) for a in alleles]
-                (; HMBR = hmean_weighted(ranks, weights))
+                ranks = Float64[]
+                weights = Float64[]
+                # iterate rows and collect only rows with both numeric rank and available weight
+                for (a, br) in zip(alleles, sdf.Best_EL_Rank)
+                    w = get(wmap, String(a), missing)
+                    brf = tryparse(Float64, string(br))
+                    if w !== missing && brf !== nothing
+                        push!(weights, w)
+                        push!(ranks, Float64(brf))
+                    end
+                end
+                if isempty(ranks)
+                    (; HMBR = missing)
+                else
+                    (; HMBR = hmean_weighted(ranks, weights))
+                end
             end
             if !isempty(agg) && :HMBR in propertynames(agg)
                 pivot_df = unstack(agg, :Peptide_Type, :HMBR)
                 rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
-                pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
-                pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-                pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+                n_before = nrow(pivot_df)
+                n_missing = count(row -> ismissing(row.HMBR_C) || ismissing(row.HMBR_V), eachrow(pivot_df))
+                filtered_missing = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V), pivot_df)
+                n_after_missing = nrow(filtered_missing)
+                n_nonbinding = count(row -> row.HMBR_C > 2 && row.HMBR_V > 2, eachrow(filtered_missing))
+                filtered_final = filter(row -> !(row.HMBR_C > 2 && row.HMBR_V > 2), filtered_missing)
+                n_final = nrow(filtered_final)
+                # filtering diagnostics suppressed
+                filtered_final.foldchange_HMBR = filtered_final.HMBR_V ./ filtered_final.HMBR_C
+                filtered_final = leftjoin(filtered_final, description_roots, on = :Locus)
+                filtered_final = select(filtered_final, :Locus, :Description, Not([:Locus, :Description]))
+                pivot_df = filtered_final
             else
                 pivot_df = DataFrame(Locus=String[], Description=String[], HMBR_C=Float64[], HMBR_V=Float64[], foldchange_HMBR=Float64[])
             end
@@ -179,21 +211,15 @@ try
             if !isempty(temp_df) && :HMBR in propertynames(temp_df)
                 pivot_df = unstack(temp_df, :Peptide_Type, :HMBR)
                 rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
-                # Report missing values before fold change calculation
-                for row in eachrow(pivot_df)
-                    if ismissing(row.HMBR_C)
-                        println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
-                    elseif ismissing(row.HMBR_V)
-                        println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
-                    end
-                end
-                # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
-                before_filter = nrow(pivot_df)
-                pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
-                removed_count = before_filter - nrow(pivot_df)
-                println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
-                # Calculate fold change (Derived (_V) / Ancestral (_C))
-                pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+                n_before = nrow(pivot_df)
+                n_missing = count(row -> ismissing(row.HMBR_C) || ismissing(row.HMBR_V), eachrow(pivot_df))
+                filtered_missing = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V), pivot_df)
+                n_after_missing = nrow(filtered_missing)
+                n_nonbinding = count(row -> row.HMBR_C > 2 && row.HMBR_V > 2, eachrow(filtered_missing))
+                filtered_final = filter(row -> !(row.HMBR_C > 2 && row.HMBR_V > 2), filtered_missing)
+                n_final = nrow(filtered_final)
+                # filtering diagnostics suppressed
+                filtered_final.foldchange_HMBR = filtered_final.HMBR_V ./ filtered_final.HMBR_C
                 # Add a log2-transformed fold change column (safe: converts non-positive or missing to missing)
                 function safe_log2(x)
                     if ismissing(x)
@@ -209,12 +235,13 @@ try
                     return log2(xf)
                 end
                 # Precompute log2 once and reuse
-                observed_log2 = [safe_log2(v) for v in pivot_df.foldchange_HMBR]
-                pivot_df.foldchange_HMBR_log2 = observed_log2
+                observed_log2 = [safe_log2(v) for v in filtered_final.foldchange_HMBR]
+                filtered_final.foldchange_HMBR_log2 = observed_log2
                 # Compute shared Description root per Locus
-                pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
+                filtered_final = leftjoin(filtered_final, description_roots, on = :Locus)
                 # Reorder to put Locus then Description first
-                pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+                filtered_final = select(filtered_final, :Locus, :Description, Not([:Locus, :Description]))
+                pivot_df = filtered_final
             else
                 pivot_df = DataFrame(Locus=String[], Description=String[], HMBR_C=Float64[], HMBR_V=Float64[], foldchange_HMBR=Float64[])
             end

@@ -8,13 +8,17 @@ Purpose:
 - Passes options to each step as needed.
 
 Usage:
-    julia context_run.jl <folder_path> [--n_loci <number_of_loci>] [--mode panel|supertype] [--override] [--seed <random_seed>]
+    julia context_run.jl <folder_path> [--n_loci <number_of_loci>] [--mode panel|supertype] [--override|--force] [--preserve-cache] [--seed <random_seed>]
 
 Arguments:
     <folder_path>   Path to the folder containing input files.
     --n_loci        Number of loci to simulate (default: 1000).
     --mode          Run mode: panel or supertype (default: panel).
-    --override      Optional flag to override existing outputs.
+    --override      Optional flag to override existing outputs (alias: --force). If not provided,
+                    the pipeline will clear the context cache at startup by default unless
+                    `--preserve-cache` is passed.
+    --preserve-cache Optional flag to preserve existing cache and resume from cached outputs.
+    --clean         Optional flag to clear caches and exit immediately (useful for CI/scripts).
     --seed          Random number seed (default: 1320).
 """
 
@@ -245,7 +249,9 @@ function atomic_write_csv(path::AbstractString, df::DataFrame)
 
     # Create a temporary filename in the same directory to allow an atomic rename.
     # Use process id and timestamp to minimise collisions.
-    tmp_path = joinpath(dir, "$(base).tmp.$(getpid()).$(Int(time()*1000))")
+    # Use rounded integer milliseconds to avoid InexactError when converting floats
+    millis = round(Int, time()*1000)
+    tmp_path = joinpath(dir, "$(base).tmp.$(getpid()).$(millis)")
     try
         # Write directly to the temporary path, then atomically rename to final path.
         CSV.write(tmp_path, df)
@@ -286,13 +292,14 @@ function main()
     n_loci = 1000
     mode = "panel"
     override = false
+    preserve_cache = false
+    clean_only = false
     seed = 1320
     verbose = false
 
     # Parse additional arguments
     for (i, arg) in enumerate(ARGS)
         if arg == "--n_loci" && i < length(ARGS)
-                println("[DIAG] Skipping cache write: context_peptides.pep missing for attempt $attempt.")
             try
                 n_loci = parse(Int, ARGS[i + 1])
             catch
@@ -301,22 +308,26 @@ function main()
             end
         elseif arg == "--mode" && i < length(ARGS)
             mode = ARGS[i + 1]
-                println("[DIAG] Skipping cache write: all loci already processed for attempt $attempt.")
             if mode ∉ ["panel", "supertype"]
                 println("Error: Invalid value for --mode.")
                 exit(1)
             end
-                println("[DIAG] Skipping cache write: error filtering duplicates for attempt $attempt.")
         elseif arg == "--verbose" || arg == "-v"
             verbose = true
         elseif arg == "--override"
             override = true
+        elseif arg == "--force"
+            # alias for override (external CLI may pass --force)
+            override = true
+        elseif arg == "--preserve-cache"
+            preserve_cache = true
+        elseif arg == "--clean"
+            clean_only = true
         elseif arg == "--seed" && i < length(ARGS)
             try
                 seed = parse(Int, ARGS[i + 1])
             catch
                 println("Error: Invalid value for --seed.")
-                println("[DIAG] Skipping cache write: error in generation for attempt $attempt.")
                 exit(1)
             end
         end
@@ -324,7 +335,6 @@ function main()
 
     # ...existing code...
     generate_script = joinpath(@__DIR__, "generate_context_peptides.jl")
-                println("[DIAG] Skipping cache write: error reading peptide file for attempt $attempt.")
 
     # Make max attempts configurable (default increased to 50)
     max_attempts = 200
@@ -340,7 +350,6 @@ function main()
     end
 
     attempt = 1
-                    println("[DIAG] Skipping cache write: NetMHCpan run failed for attempt $attempt.")
     current_n = n_loci
 
     # Prepare a persistent cache directory to store per-attempt outputs so we don't re-run
@@ -349,8 +358,45 @@ function main()
     # the primary folder_path and only loci that pass HMBR filtering are included there.
     cache_dir = joinpath(folder_path, "context_cache")
     mkpath(cache_dir)
-
-                    println("[DIAG] Skipping cache write: NetMHCpan did not produce output for attempt $attempt.")
+    # Clear cache by default unless user requests preservation. '--override'/'--force'
+    # will also force clearing (takes precedence).
+    if override || !preserve_cache
+        try
+            if isdir(cache_dir)
+                # cleared context cache at startup
+                rm(cache_dir; recursive=true)
+            end
+        catch e
+            println("Warning: could not remove existing context cache at $cache_dir: $e")
+        end
+        # Also remove master cache files if present
+        master_cache_file = joinpath(folder_path, "peptide_netmhc_processed.csv")
+        try
+                if isfile(master_cache_file)
+                    rm(master_cache_file)
+                end
+        catch e
+            println("Warning: could not remove master peptide cache at $master_cache_file: $e")
+        end
+        # Also remove any pre-existing aggregated context_scores.csv if forcing a fresh run
+        context_scores_file = joinpath(folder_path, "context_scores.csv")
+            try
+                if isfile(context_scores_file)
+                    rm(context_scores_file)
+                end
+            catch e
+                println("Warning: could not remove context_scores.csv at $context_scores_file: $e")
+            end
+        # recreate cache dir
+        mkpath(cache_dir)
+    else
+        # preserving existing cache
+        nothing
+    end
+    if clean_only
+        println("--clean requested: cleared caches (override=$override, preserve_cache=$preserve_cache). Exiting.")
+        exit(0)
+    end
     master_hm_df = DataFrame()
     master_best_df = DataFrame()
 
@@ -507,11 +553,12 @@ function main()
                             rename!(cached_df, pcol => :Peptide)
                         end
                     catch e
-                        println("[DIAG] Warning: could not normalize peptide column name: $e")
+                        # normalization warning suppressed
                     end
-                    println("[DIAG] Loaded peptide NetMHCpan cache with $(nrow(cached_df)) rows from $master_cache_file")
+                    # loaded peptide NetMHCpan cache
+                    @info "Loaded peptide NetMHCpan cache" rows=$(nrow(cached_df)) file=master_cache_file
                 else
-                    println("[DIAG] No peptide NetMHCpan cache found at $master_cache_file; starting with empty cache.")
+                    # no master peptide cache found; start with empty cache
                     cached_df = DataFrame()
                 end
             catch e
@@ -549,18 +596,14 @@ function main()
                     try
                         cached_peptides = unique(String.(cached_df[!, peptide_col]))
                     catch e
-                        println("[DIAG] Warning: could not coerce cached peptide column to String: $e")
+                        # suppressed coercion warning
+                        # println could be re-enabled for debugging if needed
                         cached_peptides = String[]
                     end
                 end
             end
             # Diagnostic: print a sample of attempt_peps and cached_peptides for debugging
-            println("[DIAG] Sample attempt_peps (first 5): ", join(first(attempt_peps, min(5, length(attempt_peps))), ", "))
-            if !isempty(cached_peptides)
-                println("[DIAG] Sample cached_df.Peptide (first 5): ", join(first(cached_peptides, min(5, length(cached_peptides))), ", "))
-            else
-                println("[DIAG] Sample cached_df.Peptide (first 5): <none found> (available columns: $(names(cached_df)))")
-            end
+            # sample attempt_peps and cached peptide previews suppressed in normal runs
             missing_peptides = setdiff(attempt_peps, cached_peptides)
 
             # If there are missing peptides, run NetMHCpan only on them and append processed results to master cache
@@ -611,7 +654,7 @@ function main()
                 if isfile(new_processed)
                     try
                         df_new = CSV.read(new_processed, DataFrame)
-                        println("[DIAG] Attempt processed output: $(nrow(df_new)) rows, sample Peptide: ", join(first(df_new.Peptide, min(5, nrow(df_new))), ", "))
+                        # attempt processed output diagnostic suppressed
                         if nrow(cached_df) == 0
                             cached_df = df_new
                         else
@@ -619,7 +662,7 @@ function main()
                             combined = vcat(cached_df, df_new)
                             cached_df = unique(combined)
                         end
-                        println("[DIAG] Master cache after append: $(nrow(cached_df)) rows, sample Peptide: ", join(first(cached_df.Peptide, min(5, nrow(cached_df))), ", "))
+                        # master cache append diagnostic suppressed
                         # Persist updated master cache
                         # Attempt to persist updated master cache with good diagnostics and a safe fallback.
                         lockdir = joinpath(folder_path, ".peptide_cache_lock")
@@ -643,7 +686,7 @@ function main()
                                 println()
                             end
                         else
-                            # We have the lock: try atomic write, but on failure fall back to non-atomic write and always release lock.
+                            # We have the lock: try atomic write with fallback; ensure lock is released in all cases
                             try
                                 try
                                     atomic_write_csv(master_cache_file, cached_df)
@@ -671,16 +714,16 @@ function main()
                             end
                         end
 
-                        # Confirm cache file exists and print row count
+                        # Confirm cache file exists and print row count (info/warn/error levels)
                         if isfile(master_cache_file)
                             try
                                 tmp_df = CSV.read(master_cache_file, DataFrame)
-                                println("[DIAG] Confirmed cache file written: $(nrow(tmp_df)) rows at $master_cache_file")
+                                @info "Confirmed cache file written" rows=$(nrow(tmp_df)) file=master_cache_file
                             catch e
-                                println("[DIAG] WARNING: cache file exists but could not be read: $e")
+                                @warn "cache file exists but could not be read" file=master_cache_file error=e
                             end
                         else
-                            println("[DIAG] ERROR: Cache file $master_cache_file was not written!")
+                            @error "Cache file was not written" file=master_cache_file
                         end
                     catch e
                         println("Warning: could not read processed output for missing peptides: $e")
@@ -714,10 +757,10 @@ function main()
                     if peptide_col !== nothing
                         attempt_rows = filter(row -> row[peptide_col] in attempt_peps, cached_df)
                     else
-                        println("[DIAG] WARNING: could not find Peptide column in master cache; producing empty attempt_rows")
+                        # cannot find Peptide column; produce empty attempt_rows
                     end
                 end
-                println("[DIAG] Attempt output for scoring: $(nrow(attempt_rows)) rows, sample Peptide: ", (nrow(attempt_rows)>0 ? join(first(attempt_rows[!, peptide_col], min(5, nrow(attempt_rows))), ", ") : "<none>"))
+                # attempt output diagnostic suppressed
                 CSV.write(joinpath(attempt_dir, "context_processed_netMHCpan_output.csv"), attempt_rows)
                 # Diagnostic: report how many rows were written and how many labeled rows will be produced after joining
                 written = nrow(attempt_rows)
@@ -905,13 +948,12 @@ function main()
         println("Note: no best-rank rows were aggregated; no aggregated best ranks file written. Expected path would have been: $best_out")
     end
 
-    try
-        main()
-    catch e
-        println("ERROR: ", e)
-        Base.show_backtrace(stderr, catch_backtrace())
-        rethrow(e)
-    end
 end
 
-main()
+try
+    main()
+catch e
+    println("ERROR: ", e)
+    Base.show_backtrace(stderr, catch_backtrace())
+    rethrow(e)
+end
