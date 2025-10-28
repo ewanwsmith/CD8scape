@@ -555,8 +555,8 @@ function main()
                     catch e
                         # normalization warning suppressed
                     end
-                    # loaded peptide NetMHCpan cache
-                    @info "Loaded peptide NetMHCpan cache" rows=$(nrow(cached_df)) file=master_cache_file
+                    # loaded peptide NetMHCpan cache — print as plain text rather than structured logger
+                    println("Loaded peptide NetMHCpan cache: rows=$(nrow(cached_df)) file=$(master_cache_file)")
                 else
                     # no master peptide cache found; start with empty cache
                     cached_df = DataFrame()
@@ -718,7 +718,7 @@ function main()
                         if isfile(master_cache_file)
                             try
                                 tmp_df = CSV.read(master_cache_file, DataFrame)
-                                @info "Confirmed cache file written" rows=$(nrow(tmp_df)) file=master_cache_file
+                                println("Confirmed cache file written: rows=$(nrow(tmp_df)) file=$(master_cache_file)")
                             catch e
                                 @warn "cache file exists but could not be read" file=master_cache_file error=e
                             end
