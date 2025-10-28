@@ -130,8 +130,8 @@ for i in 1:nrow(frames)
 end
 all_loci = collect(loci_set)
 
-# Define possible nucleotides for mutation
-nucleotides = ["A", "C", "G", "T"]
+# Define possible nucleotides for mutation (as Chars to match collected sequence elements)
+nucleotides = ['A', 'C', 'G', 'T']
 
 function main()
     # Collect n_loci non-synonymous random mutations
@@ -147,12 +147,32 @@ function main()
         if relative_locus < 1 || relative_locus > length(consensus_seq)
             continue
         end
-        consensus_base = string(consensus_seq[relative_locus])
-        # Randomly select a mutated base different from consensus
-    variant_base = rand(setdiff(nucleotides, [consensus_base]))[1] # ensure Char
-    # Edit consensus sequence to introduce variant
-    seq = collect(consensus_seq)
-    seq[relative_locus] = variant_base
+    consensus_base = consensus_seq[relative_locus]
+        # Determine candidate alt bases that produce a non-synonymous change
+        candidate_alts = setdiff(nucleotides, [consensus_base])
+    non_syn_alts = Char[]
+        cons_aa = translate_dna_to_protein(consensus_seq)
+        aa_locus_tmp = floor(Int, relative_locus / 3) + 1
+        for alt in candidate_alts
+            seq_tmp = collect(consensus_seq)
+            seq_tmp[relative_locus] = alt
+            vseq_tmp = join(seq_tmp)
+            vprot_tmp = translate_dna_to_protein(vseq_tmp)
+            if aa_locus_tmp >= 1 && aa_locus_tmp <= min(length(cons_aa), length(vprot_tmp))
+                if cons_aa[aa_locus_tmp] != vprot_tmp[aa_locus_tmp]
+                    push!(non_syn_alts, alt)
+                end
+            end
+        end
+        # If no non-synonymous alt exists, skip this locus
+        if isempty(non_syn_alts)
+            continue
+        end
+        # RNG chooses one alternative base for this locus
+    variant_base = rand(non_syn_alts)
+        # Edit consensus sequence to introduce chosen variant
+        seq = collect(consensus_seq)
+        seq[relative_locus] = variant_base
         variant_seq = join(seq)
         # Translate both sequences
         consensus_aa = translate_dna_to_protein(consensus_seq)
@@ -211,9 +231,10 @@ function main()
 
     # Generate peptides and labels for each row in joined data
     for row in eachrow(joined)
-        # For context-run we have a single introduced variant per row. Use expand_sites to decide whether to
-        # generate peptides for this window. Build a single Site with the consensus base and the variant base.
-        # sites are DNA-level here: use the relative locus to pick the base
+        # For context-run we may allow multiple alternative bases per locus as long as each
+        # resulting amino-acid substitution is distinct. Build candidate alt bases by
+        # testing all possible nucleotide changes and keep only those that are non-synonymous
+        # and produce distinct amino-acid substitutions.
     ref_base = string(row.Consensus_sequence[row.Relative_Locus])
     alt_base = string(row.Variant_sequence[row.Relative_Locus])
         site = Site(row.Relative_Locus, ref_base, [alt_base], nothing)
@@ -226,7 +247,6 @@ function main()
         end
 
         # Map combos (each is a Vector{String} of length 1) to peptides. Each combo choice is either ref_base or alt_base.
-        # For each choice present among combos, include the corresponding peptide (consensus or variant)
         choices = Set([c[1] for c in combos])
         cps = generate_peptides(row.Consensus_AA_sequence, row.AA_Locus, substr_lengths)
         vps = generate_peptides(row.Variant_AA_sequence, row.AA_Locus, substr_lengths)
