@@ -351,6 +351,8 @@ function main()
 
     attempt = 1
     current_n = n_loci
+    # Track consecutive attempts that produced zero passing loci (for early exit)
+    consecutive_zero_attempts = 0
 
     # Prepare a persistent cache directory to store per-attempt outputs so we don't re-run
     # previously-generated variants. Each attempt is executed in its own subfolder under
@@ -890,6 +892,20 @@ function main()
 
         total_passed = nrow(master_hm_df)
         println("Attempt $attempt result: $attempt_passed loci passed in this attempt; $total_passed loci aggregated total")
+
+        # Update consecutive zero-pass counter and check early-exit condition.
+        if attempt_passed == 0
+            consecutive_zero_attempts += 1
+        else
+            consecutive_zero_attempts = 0
+        end
+
+        # If we've done more than 10 attempts and observed 2 attempts in a row with
+        # zero passing loci, conclude the run early to avoid wasting time.
+        if attempt > 10 && consecutive_zero_attempts >= 2
+            println("Concluding run early: observed $consecutive_zero_attempts consecutive attempts with zero passing loci after attempt > 10.")
+            break
+        end
 
         # Cleanup attempt directory to avoid leaving large intermediate files around,
         # unless the user asked for verbose output.
