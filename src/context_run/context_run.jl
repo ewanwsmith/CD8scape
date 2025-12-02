@@ -25,6 +25,19 @@ Arguments:
 using CSV, DataFrames, FilePathsBase
 import Dates
 
+# Normalize locus identifiers for robust comparisons across attempts
+function normalize_locus(x)
+    try
+        s = string(x)
+        # strip surrounding whitespace and collapse internal whitespace
+        s = strip(s)
+        s = replace(s, r"\s+" => " ")
+        return s
+    catch
+        return string(x)
+    end
+end
+
 # Simple directory-based lock helpers (cooperative locking). This is not a full
 # cross-platform advisory lock, but it prevents accidental concurrent writers in
 # typical usage where multiple orchestrators run on the same filesystem.
@@ -493,8 +506,10 @@ function main()
                 try
                     labdf = CSV.read(labels_file, DataFrame)
                     original_count = nrow(labdf)
-                    # keep only loci not already present in master_hm_df
-                    labdf = filter(row -> !(row.Locus in master_hm_df.Locus), labdf)
+                    # Build a normalized set of already-aggregated loci for robust membership tests
+                    master_loci_set = Set(normalize_locus.(master_hm_df.Locus))
+                    # keep only loci not already present in master_hm_df (normalized comparison)
+                    labdf = filter(row -> !(normalize_locus(row.Locus) in master_loci_set), labdf)
                     filtered_count = nrow(labdf)
                     if filtered_count == 0
                         println("All generated loci in attempt $attempt have already been processed in previous attempts. Skipping attempt.")
@@ -854,10 +869,17 @@ function main()
 
                 # If master is empty just take df_hm, otherwise append only new Locus rows
                 if nrow(master_hm_df) == 0
+                    # normalize Locus values in the initial master for consistent future comparisons
+                    df_hm.Locus = normalize_locus.(df_hm.Locus)
                     master_hm_df = df_hm
                 else
-                    new_rows = filter(row -> !(row.Locus in master_hm_df.Locus), df_hm)
+                    # Build normalized set of master loci for fast membership testing
+                    master_loci_set = Set(normalize_locus.(master_hm_df.Locus))
+                    # Filter incoming rows using normalized comparisons
+                    new_rows = filter(row -> !(normalize_locus(row.Locus) in master_loci_set), df_hm)
                     if nrow(new_rows) > 0
+                        # Normalize Locus for appended rows as well
+                        new_rows.Locus = normalize_locus.(new_rows.Locus)
                         master_hm_df = vcat(master_hm_df, new_rows)
                     end
                 end
@@ -867,8 +889,12 @@ function main()
                     try
                         df_best = CSV.read(attempt_best_file, DataFrame)
                         # Filter df_best to only those loci that are present in df_hm
+                        # Normalize df_best locus identifiers to match normalized df_hm
+                        if :Locus in names(df_best)
+                            df_best.Locus = normalize_locus.(df_best.Locus)
+                        end
                         loci_in_hm = unique(df_hm.Locus)
-                        df_best_filtered = filter(row -> row.Locus in loci_in_hm, df_best)
+                        df_best_filtered = filter(row -> normalize_locus(row.Locus) in loci_in_hm, df_best)
                         if nrow(master_best_df) == 0
                             master_best_df = df_best_filtered
                         else
