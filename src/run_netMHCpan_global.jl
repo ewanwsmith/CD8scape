@@ -13,6 +13,7 @@ Arguments:
 
 include("env.jl")
 using CSV, DataFrames
+using Serialization
 
 function parse_arguments()
     args = Dict()
@@ -43,7 +44,7 @@ function get_netMHCpan_path()
     # 1) Prefer ENV set by env.jl
     if haskey(ENV, "NETMHCPAN")
         p = ENV["NETMHCPAN"] |> normpath
-        println("NetMHCpan path (ENV) -> ", p)
+        # println("NetMHCpan path (ENV) -> ", p)  # Removed as per user request
         if isfile(p) && Base.Filesystem.isexecutable(p)
             return p
         else
@@ -118,6 +119,7 @@ function main()
     representatives_file = find_representatives_file(folder_path)
     peptides_file = joinpath(folder_path, "Peptides.pep")
     xlsfile_path = joinpath(folder_path, "netMHCpan_output.tsv")
+    cache_file = joinpath(folder_path, "results_cache.jls")
 
     # Check if required files exist
     if !isfile(peptides_file)
@@ -134,6 +136,14 @@ function main()
     catch e
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
+
+    # Read peptides
+    peptide_list = open(peptides_file) do file
+        [strip(line) for line in readlines(file) if !isempty(strip(line))]
+    end
+
+
+    # TODO: Chunking and cache lookup logic will go here
 
     # Read alleles from the supertype_panel.csv file (robust to header quirks)
     df = CSV.read(representatives_file, DataFrame; normalizenames=true)
@@ -192,23 +202,77 @@ function main()
     allele_list = [replace(String(a), "*" => "") for a in collect(skipmissing(df[!, allele_col])) if !isempty(strip(String(a)))]
     alleles = join(allele_list, ",")
     netmhcpan_exec = netMHCpan_path
-    cmd = Cmd([netmhcpan_exec, "-p", peptides_file, "-xls", "-a", alleles, "-xlsfile", xlsfile_path])
-    println("Running NetMHCpan with command:")
-    println(cmd)
-    
-    try
-        run(cmd)
 
-        if isfile(xlsfile_path)
-            println("NetMHCpan output found at $xlsfile_path")
-        else
-            error("ERROR: NetMHCpan did not create the expected output file.")
+    # Prepare to chunk peptides and check cache
+
+    chunk_size = 1000
+    total_peptides = length(peptide_list)
+    peptide_chunks = [peptide_list[i:min(i+chunk_size-1, total_peptides)] for i in 1:chunk_size:total_peptides]
+    # No cache logic
+    # For each chunk, run NetMHCpan only on uncached peptides
+    temp_out_files = String[]
+    total_chunks = length(peptide_chunks)
+    total_alleles = length(allele_list)
+    for (chunk_idx, chunk) in enumerate(peptide_chunks)
+        chunk_peps = chunk
+        if isempty(chunk_peps)
+            continue
         end
-        println("NetMHCpan completed successfully.")
-    catch e
-        println("Error running NetMHCpan: ", e)
-        exit(1)
+        temp_pep_file = joinpath(folder_path, "_temp_peptides_$(chunk_idx).pep")
+        open(temp_pep_file, "w") do io
+            for pep in chunk_peps
+                println(io, pep)
+            end
+        end
+        # For each allele, run NetMHCpan and update progress
+        temp_out_files_chunk = String[]
+        for (allele_idx, allele) in enumerate(allele_list)
+            temp_out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(allele_idx).tsv")
+            push!(temp_out_files_chunk, temp_out_file)
+            cmd = Cmd([netmhcpan_exec, "-p", temp_pep_file, "-xls", "-a", allele, "-xlsfile", temp_out_file])
+            percent_done = Int(round(100 * (((chunk_idx-1)*total_alleles) + allele_idx) / (total_chunks*total_alleles)))
+            print("\rRunning chunk $(chunk_idx) / $(total_chunks). $(length(chunk_peps)) peptides. $(percent_done)% complete.")
+            flush(stdout)
+            try
+                run(pipeline(cmd, stdout=devnull, stderr=devnull))
+                if !isfile(temp_out_file)
+                    error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
+                end
+            catch e
+                println("Error running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
+                exit(1)
+            end
+            # Parse NetMHCpan output and update cache (wide format)
+            # ...existing code...
+        end
+        append!(temp_out_files, temp_out_files_chunk)
     end
+    # Merge all temp output files into final netmhcpan_output.tsv
+    println("Merging chunk outputs into $xlsfile_path ...")
+    open(xlsfile_path, "w") do out_io
+        for (i, temp_file) in enumerate(temp_out_files)
+            open(temp_file, "r") do in_io
+                for (j, line) in enumerate(eachline(in_io))
+                    # Write header only for first file
+                    if i == 1 || (j > 1 && !startswith(line, "#"))
+                        println(out_io, line)
+                    end
+                end
+            end
+        end
+    end
+    println("Merged output written to $xlsfile_path")
+    # Cleanup temp files
+    println("Cleaning up temporary files...")
+    # Remove all temp peptides and NetMHCpan output files matching patterns (including extra underscores/numbers)
+    for f in readdir(folder_path)
+        if (startswith(f, "_temp_peptides") && endswith(f, ".pep")) || (startswith(f, "_temp_netMHCpan_output") && endswith(f, ".tsv"))
+            temp_path = joinpath(folder_path, f)
+            if isfile(temp_path)
+                rm(temp_path; force=true)
+            end
+        end
+    end
+    println("Temporary files deleted.")
 end
-
 main()

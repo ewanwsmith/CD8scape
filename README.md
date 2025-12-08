@@ -75,13 +75,25 @@ All commands are run from the repository root:
 ```
 - Parses variants and reading frames, outputs `variants.csv` and `frames.csv`.
 
-### 3. Run Pipeline (Individual Genotype)
+### 3. Simulate Input Data
+```bash
+./CD8scape.jl read <folder_path> [--sample <t/n/p>] [--n_variants <n>] [--prop <0-1>]
+```
+- Parses reading frames, outputs `frames.csv`, and generates exhaustive simmulated variants per reading frame, outputs `variants.csv`.
+- `--sample t`, the default, generates all possible variants.
+- `--sample n` generates `n` variants randomly sampled from the total list. Defaults to 100 if `--n` is not given.
+- `--n` determines the number of variants sampled from the total list by `--sample n`
+- `--sample p` generates a proportion `p` of variants randomly sampled from the total list. Defaults to 0.1 if `--p` is not given. 
+- `--p` determines the proportion of variants sampled from the total list by `--sample p`.
+- `--seed` provides a random number seed for `--sample n` and `--sample p`. Defaults to 1320. 
+
+### 4. Run Pipeline (Individual Genotype)
 ```bash
 ./CD8scape.jl run <folder_path>
 ```
 - Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
 
-### 4. Run Pipeline (Supertype Panel)
+### 5. Run Pipeline (Supertype Panel)
 ```bash
 ./CD8scape.jl run_supertype <folder_path>
 ```

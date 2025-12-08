@@ -1,4 +1,6 @@
 #!/usr/bin/env julia
+using Serialization
+using DataFrames
 """
 run_netMHCpan.jl
 
@@ -84,6 +86,7 @@ function main()
     alleles_file = joinpath(folder_path, "alleles.txt")
     peptides_file = joinpath(folder_path, "Peptides.pep")
     xlsfile_path = joinpath(folder_path, "netMHCpan_output.tsv")
+    cache_file = joinpath(folder_path, "results_cache.jls")
 
     # Check if required files exist
     for file in [alleles_file, peptides_file]
@@ -107,25 +110,27 @@ function main()
     allele_list = open(alleles_file) do file
         [replace(split(line, r"\s+")[1], "*" => "") for line in readlines(file) if !isempty(line)]
     end
-    alleles = join(allele_list, ",")
 
-    cmd = `$netMHCpan_exe -p $peptides_file -xls -a $alleles -xlsfile $xlsfile_path`
-    println("Running NetMHCpan with command:")
-    println(cmd)
-    
-    try
-        run(cmd)
-
-        if isfile(xlsfile_path)
-            println("NetMHCpan output found at $xlsfile_path")
-        else
-            error("ERROR: NetMHCpan did not create the expected output file.")
-        end
-        println("NetMHCpan completed successfully.")
-    catch e
-        println("Error running NetMHCpan: ", e)
-        exit(1)
+    # Read peptides
+    peptide_list = open(peptides_file) do file
+        [strip(line) for line in readlines(file) if !isempty(strip(line))]
     end
+
+    # Load cache if exists, else initialize empty Dict
+    cache = Dict{Tuple{String,String},Any}()
+    if isfile(cache_file)
+        try
+            cache = deserialize(cache_file)
+            println("Loaded cache with $(length(cache)) entries from $cache_file")
+        catch e
+            println("Warning: Could not load cache file, starting with empty cache. Error: $e")
+            cache = Dict{Tuple{String,String},Any}()
+        end
+    else
+        println("No cache file found, starting with empty cache.")
+    end
+
+    # TODO: Chunking and cache lookup logic will go here
 end
 
 main()

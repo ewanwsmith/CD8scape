@@ -24,6 +24,7 @@ USAGE:
 COMMANDS:
   prep    Set up the environment by running src/env.jl.
   read    Attempt to parse variants input (samfire trajectories or .vcf) and read frames (SamFire or NCBI).
+  simulate Generate frames and exhaustive amino-acid variant set per frame.
   run     Run the peptide-generation and NetMHCpan pipeline on parsed data.
   run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertpe HLA panel.
   context Run the context-sensitive peptide processing pipeline.
@@ -100,6 +101,40 @@ elseif command == "read"
     end
 
     println("Reading stage finished successfully.")
+
+# Process "simulate" command
+elseif command == "simulate"
+    if length(ARGS) < 2
+        println("Error: Missing folder_path for simulate command.")
+        exit(1)
+    end
+
+    folder_path = ARGS[2]
+    frames_csv_path = joinpath(folder_path, "frames.csv")
+    extra_args = ARGS[3:end]
+
+    # Try NCBI frame reading first
+    ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
+    if !ncbi_success || !isfile(frames_csv_path)
+        println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
+        samfire_success = safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
+        if !samfire_success || !isfile(frames_csv_path)
+            println("Error: Both frame-reading methods failed.")
+            exit(1)
+        end
+    end
+
+    # Forward extra arguments to simulate_variants.jl
+    local sim_cmd = `julia --project=. src/simulate_variants.jl $folder_path`
+    for arg in extra_args
+        sim_cmd = `$sim_cmd $arg`
+    end
+    if !safe_run(sim_cmd)
+        println("Error running src/simulate_variants.jl")
+        exit(1)
+    end
+
+    println("Simulate stage finished successfully.")
 
 # Process "run" command
 elseif command == "run"
@@ -219,7 +254,7 @@ elseif command == "run_supertype"
         exit(1)
     end
 
-    println("run_supertype stage finished successfully.")
+    println("run_supertype method finished successfully.")
 
 # Process "context" command
 elseif command == "context"

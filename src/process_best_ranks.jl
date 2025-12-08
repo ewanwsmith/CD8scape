@@ -39,6 +39,14 @@ function find_best_ranks(df, pattern)
         println("Warning: No peptides found for pattern '$pattern'")
         return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
     end
+    # Coerce EL_Rank column to Float64 if not already
+    if !(eltype(subset.EL_Rank) <: AbstractFloat)
+        subset.EL_Rank = map(x -> try
+            x isa Number ? float(x) : parse(Float64, String(x))
+        catch
+            NaN
+        end, subset.EL_Rank)
+    end
     grouped = groupby(subset, [:Locus, :MHC])
     best_rows = combine(grouped) do sdf
         idx = argmin(sdf.EL_Rank)
@@ -105,25 +113,41 @@ println("Calculating harmonic mean best ranks (HMBR) for each locus...")
 if !isempty(best_ranks)
     pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
         :Best_EL_Rank => harmmean => :HMBR), :Peptide_Type, :HMBR)
-    rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
-
-    # Identify and report missing values before fold change calculation
-    for row in eachrow(pivot_df)
-        if ismissing(row.HMBR_C)
-            println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
-        elseif ismissing(row.HMBR_V)
-            println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
-        end
+    # Only rename columns if they exist
+    colnames = names(pivot_df)
+    rename_pairs = Pair{Symbol,Symbol}[]
+    if "C" in colnames
+        push!(rename_pairs, Symbol("C") => :HMBR_C)
+    end
+    if "V" in colnames
+        push!(rename_pairs, Symbol("V") => :HMBR_V)
+    end
+    if !isempty(rename_pairs)
+        rename!(pivot_df, rename_pairs...)
     end
 
-    # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
-    before_filter = nrow(pivot_df)
-    pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
-    removed_count = before_filter - nrow(pivot_df)
-    println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
+    # Warn if no variant data is present
+    if !("HMBR_V" in names(pivot_df))
+        println("Warning: No variant peptides found. Skipping fold change calculations and HMBR_V output.")
+    else
+        # Identify and report missing values before fold change calculation
+        for row in eachrow(pivot_df)
+            if ismissing(row.HMBR_C)
+                println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
+            elseif ismissing(row.HMBR_V)
+                println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
+            end
+        end
 
-    # Calculate fold change (Derived (_V) / Ancestral (_C))
-    pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+        # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
+        before_filter = nrow(pivot_df)
+        pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
+        removed_count = before_filter - nrow(pivot_df)
+        println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
+
+        # Calculate fold change (Derived (_V) / Ancestral (_C))
+        pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+    end
 
     # Compute shared Description root per Locus
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
@@ -134,7 +158,7 @@ if !isempty(best_ranks)
     # Save harmonic mean results with fold change
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv") 
     CSV.write(harmonic_mean_file, pivot_df)
-    println("Saved harmonic mean best ranks with fold change to $harmonic_mean_file")
+    println("Saved harmonic mean best ranks to $harmonic_mean_file")
 else
     println("No valid best rank data available. Skipping harmonic mean calculations.")
 end
