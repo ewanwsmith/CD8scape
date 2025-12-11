@@ -3,13 +3,13 @@
 simulate_variants.jl
 
 Generates a synthetic variants.csv from frames.csv such that
-for each amino acid position in each frame, we enumerate all possible
-amino-acid substitutions to any other amino acid.
+for each codon in each frame, we enumerate all possible
+single-nucleotide substitutions at each codon position (0,1,2).
 
 Output variants.csv columns:
-- Locus: genomic nucleotide position aligned to the codon (middle base)
-- Consensus: consensus amino acid at the AA locus
-- Variant: variant amino acid (one-letter code), excluding stop '*'
+- Locus: genomic nucleotide position mutated (any of the 3 codon bases)
+- Consensus: consensus nucleotide (A/C/G/T) at that genomic position
+- Variant: variant nucleotide (A/C/G/T, excluding the consensus)
 
 Usage:
     julia simulate_variants.jl <folder_path>
@@ -90,15 +90,20 @@ function main()
         start_nt = parse(Int, split(region_bounds[1], ",")[1])
         end_nt = parse(Int, split(region_bounds[end], ",")[2])
         dna = String(row.Consensus_sequence)
-        # For each nucleotide in the region
-        for i in 1:length(dna)
-            locus = start_nt + i - 1
-            consensus_nt = dna[i]
-            for var_nt in nucleotides
-                if var_nt == consensus_nt
-                    continue
+        # For each codon, mutate each position (0,1,2) to capture all possible AA changes via single-nucleotide variants
+        n_codons = div(length(dna), 3)
+        for codon_idx in 1:n_codons
+            dna_start = (codon_idx - 1) * 3 + 1
+            for pos in 0:2
+                offset = dna_start + pos
+                locus = start_nt + offset - 1
+                consensus_nt = dna[offset]
+                for var_nt in nucleotides
+                    if var_nt == consensus_nt
+                        continue
+                    end
+                    push!(out, (locus, string(consensus_nt), string(var_nt)))
                 end
-                push!(out, (locus, string(consensus_nt), string(var_nt)))
             end
         end
     end
