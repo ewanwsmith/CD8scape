@@ -105,7 +105,7 @@ end
 
 function main()
     if length(ARGS) < 1
-        println("Usage: julia script_name.jl <folder_path>")
+        println("Usage: julia read_samfire_frames.jl <folder_path>")
         exit(1)
     end
 
