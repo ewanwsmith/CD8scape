@@ -31,3 +31,7 @@ Manifest.toml
 
 # Ignore local settings file
 src/settings.txt
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
