@@ -43,12 +43,13 @@ end
 # Command-line argument for folder path
 function main()
     if length(ARGS) != 1
-        println("Usage: julia clean_peptides.jl --folder <folder_path>")
+        println("Usage: julia clean_peptides.jl <folder_path>")
         return
     end
-    
     folder_path = ARGS[1]
     process_peptides(folder_path)
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
