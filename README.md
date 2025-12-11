@@ -124,3 +124,5 @@ Stanevich, O.V., Alekseeva, E.I., Sergeeva, M. et al. SARS-CoV-2 escape from cyt
 
 ## License
 GNU Public License
+## Removed
+- The context-based pipeline under `src/context_run` was removed in favor of the simulation workflow.
