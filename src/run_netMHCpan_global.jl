@@ -213,6 +213,9 @@ function main()
     temp_out_files = String[]
     total_chunks = length(peptide_chunks)
     total_alleles = length(allele_list)
+    # Precompute chunk sizes and cumulative counts for accurate progress
+    chunk_lengths = map(length, peptide_chunks)
+    cumulative_lengths = cumsum([0; chunk_lengths[1:end-1]])
     for (chunk_idx, chunk) in enumerate(peptide_chunks)
         chunk_peps = chunk
         if isempty(chunk_peps)
@@ -230,7 +233,11 @@ function main()
             temp_out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(allele_idx).tsv")
             push!(temp_out_files_chunk, temp_out_file)
             cmd = Cmd([netmhcpan_exec, "-p", temp_pep_file, "-xls", "-a", allele, "-xlsfile", temp_out_file])
-            percent_done = Int(round(100 * (((chunk_idx-1)*total_alleles) + allele_idx) / (total_chunks*total_alleles)))
+            # Progress based on total peptides across alleles, accounting for variable chunk sizes
+            total_work = total_alleles * total_peptides
+            processed_before_chunk = total_alleles * cumulative_lengths[chunk_idx]
+            processed_in_current = allele_idx * length(chunk_peps)
+            percent_done = Int(floor(100 * (processed_before_chunk + processed_in_current) / total_work))
             print("\rRunning chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete.")
             flush(stdout)
             try
@@ -248,6 +255,8 @@ function main()
         append!(temp_out_files, temp_out_files_chunk)
     end
     # Merge all temp output files into final netmhcpan_output.tsv
+    # Ensure the progress line ends with a newline before merging message
+    print("\n")
     println("Merging chunk outputs into $xlsfile_path ...")
     open(xlsfile_path, "w") do out_io
         for (i, temp_file) in enumerate(temp_out_files)
