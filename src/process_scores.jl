@@ -91,4 +91,6 @@ function main()
     println("Processing completed successfully!")
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
