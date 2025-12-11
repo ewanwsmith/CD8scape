@@ -12,7 +12,12 @@ Output variants.csv columns:
 - Variant: variant nucleotide (A/C/G/T, excluding the consensus)
 
 Usage:
-    julia simulate_variants.jl <folder_path>
+    julia simulate_variants.jl <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
+
+Sampling options (standalone, no --sample needed):
+- --n: sample an absolute count of variants (e.g., --n 500)
+- --p: sample a proportion of variants in [0,1] (e.g., --p 0.25)
+    If both --n and --p are provided, --n takes precedence.
 
 Requires:
     frames.csv in <folder_path> with columns: Region, Consensus_sequence, Description
@@ -109,22 +114,38 @@ function main()
     end
 
     # Parse additional arguments
-    sample_mode = "t"
-    prop = 0.1
-    n = 100
+    # New behavior: --n and --p are sufficient; no --sample mode required
+    # Defaults when flags are present without values:
+    #   --n       -> 1000
+    #   --p/--prop-> 0.1
+    have_n = false
+    have_p = false
+    prop = 1.0
+    n = 0
     seed = 1320
     i = 2
     while i <= length(ARGS)
         arg = ARGS[i]
-        if arg == "--sample"
-            i += 1
-            sample_mode = ARGS[i]
-        elseif arg == "--prop"
-            i += 1
-            prop = parse(Float64, ARGS[i])
+        if arg == "--prop" || arg == "--p"
+            # Support optional value; default to 0.1 if omitted
+            # Example: `--p` is equivalent to `--p 0.1`
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                i += 1
+                prop = parse(Float64, ARGS[i])
+            else
+                prop = 0.1
+            end
+            have_p = true
         elseif arg == "--n"
-            i += 1
-            n = parse(Int, ARGS[i])
+            # Support optional value; default to 1000 if omitted
+            # Example: `--n` is equivalent to `--n 1000`
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                i += 1
+                n = parse(Int, ARGS[i])
+            else
+                n = 1000
+            end
+            have_n = true
         elseif arg == "--seed"
             i += 1
             seed = parse(Int, ARGS[i])
@@ -135,24 +156,30 @@ function main()
 
     variants_path = joinpath(folder, "variants.csv")
     println("Simulated variant rows: ", nrow(out))
-    # Sampling logic
-    if sample_mode == "p"
+    # Sampling logic: --n and --p are sufficient
+    if have_n && have_p
+        println("Note: both --n and --p provided; using --n and ignoring --p.")
+    end
+    if have_n
+        if n <= 0
+            println("Warning: --n should be > 0. Outputting total variants.")
+        else
+            n = min(n, nrow(out))
+            out = out[shuffle(1:nrow(out))[1:n], :]
+            println("Sampled n: ", n)
+            println("(output: ", nrow(out), " variants)")
+        end
+    elseif have_p
         if prop <= 0 || prop > 1.0
-            println("Warning: --prop value ", prop, " is outside [0,1]. Defaulting to 1.0 (100%).")
+            println("Warning: --p/--prop value ", prop, " is outside (0,1]. Defaulting to 1.0 (100%).")
             prop = 1.0
         end
-        out = out[shuffle(1:nrow(out))[1:ceil(Int, prop * nrow(out))], :]
+        k = ceil(Int, prop * nrow(out))
+        out = out[shuffle(1:nrow(out))[1:k], :]
         println("Sampled proportion: ", prop)
         println("(output: ", nrow(out), " variants)")
-    elseif sample_mode == "n"
-        n = min(n, nrow(out))
-        out = out[shuffle(1:nrow(out))[1:n], :]
-        println("Sampled n: ", n)
-        println("(output: ", nrow(out), " variants)")
-    elseif sample_mode == "t"
-        println("Total variants: ", nrow(out))
     else
-        println("Unknown sample mode: ", sample_mode, ". Defaulting to total.")
+        println("No sampling options provided; outputting total variants: ", nrow(out))
     end
     # Always write the current 'out' DataFrame (sampled or total)
     CSV.write(variants_path, out)

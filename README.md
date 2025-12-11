@@ -77,15 +77,14 @@ All commands are run from the repository root:
 
 ### 3. Simulate Input Data
 ```bash
-./CD8scape.jl read <folder_path> [--sample <t/n/p>] [--n_variants <n>] [--prop <0-1>]
+./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
 ```
-- Parses reading frames, outputs `frames.csv`, and generates exhaustive simmulated variants per reading frame, outputs `variants.csv`.
-- `--sample t`, the default, generates all possible variants.
-- `--sample n` generates `n` variants randomly sampled from the total list. Defaults to 100 if `--n` is not given.
-- `--n` determines the number of variants sampled from the total list by `--sample n`
-- `--sample p` generates a proportion `p` of variants randomly sampled from the total list. Defaults to 0.1 if `--p` is not given. 
-- `--p` determines the proportion of variants sampled from the total list by `--sample p`.
-- `--seed` provides a random number seed for `--sample n` and `--sample p`. Defaults to 1320. 
+- Parses reading frames (writes `frames.csv`) and generates exhaustive simulated single-nucleotide variants per reading frame (writes `variants.csv`).
+- Sampling options:
+   - `--n <count>`: sample an absolute number of variants.
+   - `--p <proportion>` (alias `--prop`): sample a proportion in (0,1].
+   - If both `--n` and `--p` are provided, `--n` takes precedence.
+ - Defaults: `--n` defaults to `1000` and `--p` defaults to `0.1` when you choose to sample by count or proportion; no sampling flags writes all variants. `--seed` sets RNG seed (default: `1320`).
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
