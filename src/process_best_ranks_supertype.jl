@@ -96,23 +96,24 @@ end
 # Args & IO
 # -----------------------------
 
-if length(ARGS) != 1
-    println("Usage: julia process_best_ranks_supertype.jl <folder_path>")
-    exit(1)
-end
+if abspath(PROGRAM_FILE) == @__FILE__
+    if length(ARGS) != 1
+        println("Usage: julia process_best_ranks_supertype.jl <folder_path>")
+        exit(1)
+    end
 
-folder_path = ARGS[1]
-input_file = joinpath(folder_path, "processed_peptides.csv")
-println("Reading input file: $input_file")
+    folder_path = ARGS[1]
+    input_file = joinpath(folder_path, "processed_peptides.csv")
+    println("Reading input file: $input_file")
 
-# Read the input CSV into a DataFrame with error handling
-try
-    global df = CSV.read(input_file, DataFrame)
-    println("Successfully loaded data with $(nrow(df)) rows")
-catch e
-    println("Error reading input file: $e")
-    exit(1)
-end
+    # Read the input CSV into a DataFrame with error handling
+    try
+        global df = CSV.read(input_file, DataFrame)
+        println("Successfully loaded data with $(nrow(df)) rows")
+    catch e
+        println("Error reading input file: $e")
+        exit(1)
+    end
 
 # -----------------------------
 # Compute best ranks per (Locus, MHC) for C and V peptides
@@ -134,15 +135,15 @@ function find_best_ranks(df, pattern)
     return best_rows
 end
 
-println("Calculating best ranks for consensus peptides (_C)...")
-best_C = find_best_ranks(df, "_C")
-best_C.Peptide_Type .= "C"
-println("Found best ranks for consensus peptides: $(nrow(best_C)) entries")
+    println("Calculating best ranks for consensus peptides (_C)...")
+    best_C = find_best_ranks(df, "_C")
+    best_C.Peptide_Type .= "C"
+    println("Found best ranks for consensus peptides: $(nrow(best_C)) entries")
 
-println("Calculating best ranks for variant peptides (_V)...")
-best_V = find_best_ranks(df, "_V")
-best_V.Peptide_Type .= "V"
-println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
+    println("Calculating best ranks for variant peptides (_V)...")
+    best_V = find_best_ranks(df, "_V")
+    best_V.Peptide_Type .= "V"
+    println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
 
 best_ranks = vcat(best_C, best_V)
 
@@ -362,4 +363,5 @@ if !isempty(best_ranks)
     println("Saved weighted harmonic mean best ranks with fold change to $harmonic_mean_file")
 else
     println("No valid best rank data available. Skipping harmonic mean calculations.")
+end
 end
