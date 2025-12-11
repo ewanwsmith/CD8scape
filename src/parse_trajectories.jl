@@ -115,7 +115,7 @@ end
 
 function main()
     if length(ARGS) < 1
-        println("Usage: julia script.jl <folder_path>")
+        println("Usage: julia parse_trajectories.jl <folder_path>")
         return
     end
 
