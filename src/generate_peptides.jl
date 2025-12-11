@@ -271,18 +271,20 @@ function separate_peptides(df::DataFrame)::DataFrame
     # Retain only rows where the consensus peptide and variant peptide differ.
     initial_rows = nrow(df)
     
-    dropped_df = filter(row -> row.Consensus_Peptide == row.Variant_Peptide ||
-                                occursin('*', row.Consensus_Peptide) ||
-                                occursin('*', row.Variant_Peptide), df)
-    removed_loci = length(unique(dropped_df.Locus))
-    
+    # Identify loci dropped for synonymity and stop codons separately
+    dropped_syn_df = filter(row -> row.Consensus_Peptide == row.Variant_Peptide, df)
+    dropped_stop_df = filter(row -> occursin('*', row.Consensus_Peptide) || occursin('*', row.Variant_Peptide), df)
+    removed_syn_loci = length(unique(dropped_syn_df.Locus))
+    removed_stop_loci = length(unique(dropped_stop_df.Locus))
+    removed_syn_rows = nrow(dropped_syn_df)
+    removed_stop_rows = nrow(dropped_stop_df)
+
     filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide &&
                                 !occursin('*', row.Consensus_Peptide) &&
                                 !occursin('*', row.Variant_Peptide), df)
-    
-    final_rows = nrow(filtered_df)
-    removed_rows = initial_rows - final_rows
-    println("Removed $removed_rows peptides from $removed_loci loci due to stop codons.")
+
+    println("Removed $removed_syn_rows peptides from $removed_syn_loci loci due to synonymity.")
+    println("Removed $removed_stop_rows peptides from $removed_stop_loci loci due to stop codons.")
     
     transformed_df = DataFrame(
         Locus = Int[],
