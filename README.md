@@ -7,7 +7,7 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 - MHC binding prediction using netMHCpan
 - Robust output parsing and best-rank calculation
 - Harmonic mean best rank (HMBR) and fold change analysis
-- Context run for placing output metrics in the context of a simulated random background
+ 
 
 ## Requirements
 - Perl 5
@@ -98,28 +98,20 @@ All commands are run from the repository root:
 ```
 - As above, but uses a representative supertype HLA panel.
 
-### 5. Context Run (Benchmarking)
-```bash
-./CD8scape.jl context <folder_path> [--supertype] [--n_loci <number_of_loci>] [--force]
-```
-- Runs context-sensitive pipeline to generate simulated loci and peptides, runs netMHCpan, and compares observed fold changes to a distribution of random mutations for the same genome.
-- `--n_loci <number_of_loci>` sets the number of simulated loci (default: 1000).
-- If `--supertype` is provided, uses the representative supertype HLA panel for predictions.
-- If intermediate results exist, resumes from the appropriate step.
-- Use `--force` to rerun the full pipeline.
+ 
 
 ## Workflow Summary
 1. **prep**: Install dependencies
 2. **read**: Parse variants and frames
 3. **run/run_supertype**: Generate peptides, predict binding, process output, calculate best ranks and fold changes
-4. **context**: Simulate background, run predictions, compare observed results to context distribution
+ 
 
 ## Output Files
 - `variants.csv`, `frames.csv`: Parsed input data
 - `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
 - `best_ranks.csv`, `harmonic_mean_best_ranks.csv`: Best ranks and fold change analysis
-- `context_scores.csv`, `context_harmonic_mean_best_ranks.csv`, `harmonic_mean_best_ranks_with_percentile.csv`: Context run outputs
+ 
 
 ## Citation
 

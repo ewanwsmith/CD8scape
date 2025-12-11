@@ -19,7 +19,7 @@ USAGE:
   ./CD8scape.jl read <folder_path>
   ./CD8scape.jl run  <folder_path>
   ./CD8scape.jl run_supertype  <folder_path>
-  ./CD8scape.jl context <folder_path>
+  
 
 COMMANDS:
   prep    Set up the environment by running src/env.jl.
@@ -27,7 +27,7 @@ COMMANDS:
   simulate Generate frames and exhaustive amino-acid variant set per frame.
   run     Run the peptide-generation and NetMHCpan pipeline on parsed data.
   run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertpe HLA panel.
-  context Run the context-sensitive peptide processing pipeline.
+  
 
 OPTIONS:
   --help, -h
@@ -55,18 +55,12 @@ command = ARGS[1]
 
 # Process "prep" command
 if command == "prep"
-    if length(ARGS) > 1
-        println("Error: 'prep' command does not take any additional arguments.")
+    # Setup environment
+    if !safe_run(`julia --project=. src/env.jl`)
+        println("Error running src/env.jl")
         exit(1)
     end
-
-    try
-        include("src/env.jl")
-        println("Environment setup completed successfully.")
-    catch e
-        println("Error running src/env.jl: $e")
-        exit(1)
-    end
+    println("Environment setup finished successfully.")
 
 # Process "read" command
 elseif command == "read"
@@ -74,33 +68,39 @@ elseif command == "read"
         println("Error: Missing folder_path for read command.")
         exit(1)
     end
-
     folder_path = ARGS[2]
-
-    parse_success = safe_run(`julia --project=. src/parse_trajectories.jl $folder_path`)
-    if !parse_success
-        parse_success = safe_run(`julia --project=. src/parse_vcf.jl $folder_path`)
-        if !parse_success
-            println("Error: Both trajectory parsing methods failed.")
-            exit(1)
-        end
-    end
-
-    # Try NCBI frame reading first
-    ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
     frames_csv_path = joinpath(folder_path, "frames.csv")
+    variants_csv_path = joinpath(folder_path, "variants.csv")
 
+    # Read frames (NCBI first, then Samfire fallback)
+    ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
     if !ncbi_success || !isfile(frames_csv_path)
         println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
         samfire_success = safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
-
         if !samfire_success || !isfile(frames_csv_path)
             println("Error: Both frame-reading methods failed.")
             exit(1)
         end
     end
 
-    println("Reading stage finished successfully.")
+    # Parse variants: prefer VCF if present, otherwise trajectories
+    vcf_files = filter(f -> endswith(f, ".vcf") || endswith(f, ".vcf.gz"), readdir(folder_path; join=true))
+    parse_ok = false
+    if !isempty(vcf_files)
+        parse_ok = safe_run(`julia --project=. src/parse_vcf.jl $folder_path`)
+        if !parse_ok
+            println("parse_vcf.jl failed; trying parse_trajectories.jl.")
+        end
+    end
+    if !parse_ok
+        parse_ok = safe_run(`julia --project=. src/parse_trajectories.jl $folder_path`)
+    end
+    if !parse_ok || !isfile(variants_csv_path)
+        println("Error: Failed to parse variants from VCF or trajectories.")
+        exit(1)
+    end
+
+    println("Read stage finished successfully.")
 
 # Process "simulate" command
 elseif command == "simulate"
@@ -256,79 +256,7 @@ elseif command == "run_supertype"
 
     println("run_supertype method finished successfully.")
 
-# Process "context" command
-elseif command == "context"
-
-    if length(ARGS) < 2
-        println("Error: Missing folder_path for context command.")
-        exit(1)
-    end
-
-    folder_path = ARGS[2]
-    remaining_args = ARGS[3:end]
-
-    # Check for --force
-    force = any(x -> x == "--force", remaining_args)
-
-    # Output file to check
-    context_output = joinpath(folder_path, "context_scores.csv")
-
-    if force
-        println("--force specified: Running full context pipeline (this may take a while!)")
-        local cmd = `julia --project=. src/context_run/context_run.jl $folder_path`
-        for arg in remaining_args
-            cmd = `$cmd $arg`
-        end
-        if !safe_run(cmd)
-            println("Error running src/context_run/context_run.jl")
-            exit(1)
-        end
-        # Always run distribution step after full context run
-        println("Running distribution step...")
-        if !safe_run(`julia --project=. src/context_run/context_distribution.jl $folder_path`)
-            println("Error running context_distribution.jl")
-            exit(1)
-        end
-        println("Context stage finished successfully.")
-    elseif isfile(context_output)
-        println("Context scores found: Carrying on from context_scores.csv and running remaining steps.")
-        # Run process_best_ranks_context.jl (panel or supertype)
-        mode = "panel"
-        if any(x -> x == "--supertype", remaining_args)
-            mode = "supertype"
-        end
-        best_ranks_cmd = mode == "supertype" ?
-            `julia --project=. src/context_run/process_best_ranks_context.jl $folder_path --supertype` :
-            `julia --project=. src/context_run/process_best_ranks_context.jl $folder_path`
-        if !safe_run(best_ranks_cmd)
-            println("Error running process_best_ranks_context.jl")
-            exit(1)
-        end
-        # Run distribution step
-        println("Running distribution step...")
-        if !safe_run(`julia --project=. src/context_run/context_distribution.jl $folder_path`)
-            println("Error running context_distribution.jl")
-            exit(1)
-        end
-        println("Context distribution step finished successfully.")
-    else
-        println("Context scores not found: Running full context pipeline (this may take a while !)")
-        local cmd = `julia --project=. src/context_run/context_run.jl $folder_path`
-        for arg in remaining_args
-            cmd = `$cmd $arg`
-        end
-        if !safe_run(cmd)
-            println("Error running src/context_run/context_run.jl")
-            exit(1)
-        end
-        # Always run distribution step after full context run
-        println("Running distribution step...")
-        if !safe_run(`julia --project=. src/context_run/context_distribution.jl $folder_path`)
-            println("Error running context_distribution.jl")
-            exit(1)
-        end
-        println("Context stage finished successfully.")
-    end
+  
 
 else
     println("Error: Invalid command '$command'.")

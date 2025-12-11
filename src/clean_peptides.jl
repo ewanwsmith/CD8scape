@@ -18,9 +18,9 @@ using DataFrames
 function process_peptides(folder_path::String)
     # Construct the file path
     files = readdir(folder_path)
-    peptide_file = findfirst(f -> lowercase(f) in ["peptides.pep", "context_peptides.pep"], lowercase.(files))
+    peptide_file = findfirst(f -> lowercase(f) == "peptides.pep", lowercase.(files))
     if peptide_file === nothing
-        println("Error: No peptide file (Peptides.pep or context_Peptides.pep) found in folder.")
+        println("Error: No peptide file (peptides.pep) found in folder.")
         return
     end
     file_path = joinpath(folder_path, files[peptide_file])
