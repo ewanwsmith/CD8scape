@@ -150,7 +150,6 @@ if !isempty(best_ranks)
     if ("HMBR_C" in names(pivot_df)) && ("HMBR_V" in names(pivot_df))
         pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
         pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
-        println("DEBUG: log2_foldchange_HMBR column added. Example values: ", pivot_df.log2_foldchange_HMBR[1:min(5, nrow(pivot_df))])
     else
         println("DEBUG: Cannot calculate foldchange_HMBR or log2_foldchange_HMBR due to missing columns.")
     end
@@ -186,7 +185,6 @@ if !isempty(best_ranks)
         CSV.write(minimal_test_file, minimal_df)
         println("Minimal test CSV written to $minimal_test_file")
     else
-        println("Minimal test: log2_foldchange_HMBR not found in DataFrame.")
     end
 else
     println("No valid best rank data available. Skipping harmonic mean calculations.")
