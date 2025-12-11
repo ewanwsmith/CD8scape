@@ -27,8 +27,6 @@ using CSV
 using DataFrames
 using Random
 
-const AMINO_ACIDS = collect("ARNDCEQGHILKMFPSTWYV")  # 20 canonical AAs
-
 # Global codon dictionary for translation
 const CODON_DICT = Dict(
     "ATA"=>"I","ATC"=>"I","ATT"=>"I","ATG"=>"M",
@@ -61,15 +59,7 @@ function parse_region_bounds(region::AbstractString)
     return start, end_
 end
 
-function translate_dna_to_protein(dna_sequence::String)::String
-    prot = IOBuffer()
-    up = uppercase(dna_sequence)
-    for i in 1:3:length(up)-2
-        aa = get(CODON_DICT, up[i:i+2], "?")
-        print(prot, aa)
-    end
-    return String(take!(prot))
-end
+ 
 
 function main()
     if length(ARGS) < 1
