@@ -231,7 +231,7 @@ function main()
             push!(temp_out_files_chunk, temp_out_file)
             cmd = Cmd([netmhcpan_exec, "-p", temp_pep_file, "-xls", "-a", allele, "-xlsfile", temp_out_file])
             percent_done = Int(round(100 * (((chunk_idx-1)*total_alleles) + allele_idx) / (total_chunks*total_alleles)))
-            print("\rRunning chunk $(chunk_idx) / $(total_chunks). $(length(chunk_peps)) peptides. $(percent_done)% complete.")
+            print("\rRunning chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete.")
             flush(stdout)
             try
                 run(pipeline(cmd, stdout=devnull, stderr=devnull))
