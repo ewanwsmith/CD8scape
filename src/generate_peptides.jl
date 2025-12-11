@@ -350,39 +350,45 @@ if length(ARGS) == 1 && ARGS[1] == "--help"
     exit(0)
 elseif length(ARGS) < 1
     println("Error: No data folder provided.")
-    println("Run `julia script.jl --help` for usage.")
+    println("Run `julia generate_peptides.jl --help` for usage.")
     exit(1)
 end
 
-# The first argument should be the data_folder
-data_folder = ARGS[1]
+function main()
+    # The first argument should be the data_folder
+    data_folder = ARGS[1]
 
-# Run the processing pipeline
-joined = join_data(data_folder)
-checked = check_locus(joined)
-edited = edit_consensus_sequence(checked)
-translated = translate_sequences(edited)
+    # Run the processing pipeline
+    joined = join_data(data_folder)
+    checked = check_locus(joined)
+    edited = edit_consensus_sequence(checked)
+    translated = translate_sequences(edited)
 
-# Define locus-based peptide lengths to generate
-substr_lengths = [8, 9, 10, 11]
+    # Define locus-based peptide lengths to generate
+    substr_lengths = [8, 9, 10, 11]
 
-flattened_peptides_df = add_peptides_columns!(
-    translated, 
-    :Relative_Locus, 
-    :Consensus_AA_sequence, 
-    :Variant_AA_sequence, 
-    substr_lengths
-)
+    flattened_peptides_df = add_peptides_columns!(
+        translated, 
+        :Relative_Locus, 
+        :Consensus_AA_sequence, 
+        :Variant_AA_sequence, 
+        substr_lengths
+    )
 
-transformed_df = separate_peptides(flattened_peptides_df)
-transformed_df = deduplicate_peptides(transformed_df)
+    transformed_df = separate_peptides(flattened_peptides_df)
+    transformed_df = deduplicate_peptides(transformed_df)
 
-peptide_df = transformed_df
+    peptide_df = transformed_df
 
-# Save to CSV
-csv_file_path = joinpath(data_folder, "peptides_labels.csv")
-CSV.write(csv_file_path, peptide_df)
-println("peptides_labels.csv file has been written to: $csv_file_path")
+    # Save to CSV
+    csv_file_path = joinpath(data_folder, "peptides_labels.csv")
+    CSV.write(csv_file_path, peptide_df)
+    println("peptides_labels.csv file has been written to: $csv_file_path")
 
-# Save peptides to .pep file
-write_peptides_file_no_headers(peptide_df, data_folder)
+    # Save peptides to .pep file
+    write_peptides_file_no_headers(peptide_df, data_folder)
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
