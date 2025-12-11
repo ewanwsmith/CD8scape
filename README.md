@@ -68,6 +68,7 @@ All commands are run from the repository root:
 ```bash
 ./CD8scape.jl prep
 ```
+Note: `prep` performs all dependency installation and environment setup. The other commands (`read`, `simulate`, `run`, `run_supertype`) do not install packages and assume the environment is already prepared.
 
 ### 2. Parse Input Data
 ```bash
