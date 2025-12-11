@@ -50,8 +50,13 @@ function find_best_ranks(df, pattern)
     grouped = groupby(subset, [:Locus, :MHC])
     best_rows = combine(grouped) do sdf
         idx = argmin(sdf.EL_Rank)
+        raw_desc = String(sdf.Peptide_label[idx])
+        # Keep mutation info; remove trailing _C/_V, strip numeric suffix (e.g. _17), and replace spaces with underscores
+        cleaned_desc = replace(raw_desc, r"_(C|V)$" => "")
+        cleaned_desc = replace(cleaned_desc, r"_\d+$" => "")
+        cleaned_desc = replace(cleaned_desc, ' ' => '_')
         (; Best_EL_Rank = sdf.EL_Rank[idx],
-           Description = sdf.Peptide_label[idx],
+           Description = cleaned_desc,
            Sequence = sdf.Peptide[idx])
     end
     return best_rows
@@ -68,39 +73,34 @@ best_V = find_best_ranks(df, "_V")
 best_V.Peptide_Type .= "V"
 println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
 
-# Combine consensus and variant results and save as best_ranks.csv
+
+# Combine consensus and variant results
 best_ranks = vcat(best_C, best_V)
 
-# Clean descriptions to remove suffix (e.g., _C, _V, _1, etc.)
-best_ranks.Description = [replace(strip(string(s)), r"_[^_]*$" => "") for s in best_ranks.Description]
+# --- Map Locus to protein Description from frames.csv ---
+frames_file = joinpath(folder_path, "frames.csv")
+if isfile(frames_file)
+    frames_df = CSV.read(frames_file, DataFrame)
+    # Extract start positions from Region (assume first number is start)
+    function region_to_start(region)
+        # Handles both "start,end" and "start1,end1;start2,end2" cases
+        split(strip(string(region)), ";")[1] |> x -> split(x, ",")[1] |> y -> parse(Int, y)
+    end
+    # No longer override Description from frames; retain mutation and protein label from Peptide_label
+else
+    println("Warning: frames.csv not found in $folder_path. Protein labels will not be mapped.")
+end
 
 # Reorder to put Locus then Description first
 best_ranks = select(best_ranks, :Locus, :Description, Not([:Locus, :Description]))
 
-# Compute shared Description root per Locus
-function shared_prefix(strings)
-    cleaned = [replace(s, r"_([^_]*)$" => "") for s in strings]
-    if isempty(cleaned)
-        return ""
-    end
-    prefix = cleaned[1]
-    for s in cleaned[2:end]
-        minlen = min(length(prefix), length(s))
-        i = 1
-        while i <= minlen && prefix[i] == s[i]
-            i += 1
-        end
-        prefix = prefix[1:i-1]
-        if isempty(prefix)
-            break
-        end
-    end
-    prefix = replace(prefix, r"_$" => "")
-    return prefix
-end
+# Final tidy on Description: remove any trailing underscores and numeric suffixes
+best_ranks.Description = replace.(best_ranks.Description, r"_\d+$" => "")
+best_ranks.Description = replace.(best_ranks.Description, r"_+$" => "")
 
+# Compute one Description per Locus: prefer current cleaned, otherwise first seen
 description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-    (; Locus = sdf.Locus[1], Description = shared_prefix(sdf.Description))
+    (; Locus = sdf.Locus[1], Description = sdf.Description[1])
 end
 
 # Save best_ranks.csv
@@ -129,36 +129,65 @@ if !isempty(best_ranks)
     # Warn if no variant data is present
     if !("HMBR_V" in names(pivot_df))
         println("Warning: No variant peptides found. Skipping fold change calculations and HMBR_V output.")
-    else
-        # Identify and report missing values before fold change calculation
-        for row in eachrow(pivot_df)
-            if ismissing(row.HMBR_C)
-                println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
-            elseif ismissing(row.HMBR_V)
-                println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
-            end
+    end
+
+    # Identify and report missing values before fold change calculation
+    for row in eachrow(pivot_df)
+        if ismissing(row.HMBR_C)
+            println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
+        elseif ismissing(row.HMBR_V)
+            println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
         end
+    end
 
-        # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
-        before_filter = nrow(pivot_df)
-        pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
-        removed_count = before_filter - nrow(pivot_df)
-        println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
+    # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
+    before_filter = nrow(pivot_df)
+    pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
+    removed_count = before_filter - nrow(pivot_df)
+    println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
 
-        # Calculate fold change (Derived (_V) / Ancestral (_C))
+    # Calculate fold change (Derived (_V) / Ancestral (_C)) for all valid rows
+    if ("HMBR_C" in names(pivot_df)) && ("HMBR_V" in names(pivot_df))
         pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+        pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
+        println("DEBUG: log2_foldchange_HMBR column added. Example values: ", pivot_df.log2_foldchange_HMBR[1:min(5, nrow(pivot_df))])
+    else
+        println("DEBUG: Cannot calculate foldchange_HMBR or log2_foldchange_HMBR due to missing columns.")
     end
 
     # Compute shared Description root per Locus
     pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
 
-    # Reorder to put Locus then Description first
-    pivot_df = select(pivot_df, :Locus, :Description, Not([:Locus, :Description]))
+    # Keep Description exactly as mapped; ensure no trailing underscores or numeric suffixes
+    if :Description in names(pivot_df)
+        pivot_df.Description = replace.(pivot_df.Description, r"_\d+$" => "")
+        pivot_df.Description = replace.(pivot_df.Description, r"_+$" => "")
+    end
+
+    # Calculate fold change and log2 after all joins/cleaning
+    if ("HMBR_C" in names(pivot_df)) && ("HMBR_V" in names(pivot_df))
+        pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+        pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
+    end
+
+    # Prepare final output columns (use already computed values)
+    output_cols = [:Locus, :Description, :HMBR_C, :HMBR_V, :foldchange_HMBR, :log2_foldchange_HMBR]
+    pivot_df = select(pivot_df, output_cols...)
 
     # Save harmonic mean results with fold change
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv") 
     CSV.write(harmonic_mean_file, pivot_df)
     println("Saved harmonic mean best ranks to $harmonic_mean_file")
+
+    # Minimal test: write Locus and log2_foldchange_HMBR to a separate CSV for debugging
+    if :log2_foldchange_HMBR in names(pivot_df)
+        minimal_test_file = joinpath(folder_path, "harmonic_mean_best_ranks_log2_test.csv")
+        minimal_df = select(pivot_df, :Locus, :log2_foldchange_HMBR)
+        CSV.write(minimal_test_file, minimal_df)
+        println("Minimal test CSV written to $minimal_test_file")
+    else
+        println("Minimal test: log2_foldchange_HMBR not found in DataFrame.")
+    end
 else
     println("No valid best rank data available. Skipping harmonic mean calculations.")
 end
