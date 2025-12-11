@@ -1,3 +1,44 @@
+## Quick Start
+
+- Prep environment and external tools:
+   - Activates the `src` Julia environment, installs deps, and checks NetMHCpan + Perl.
+
+```bash
+./CD8scape.jl prep
+```
+
+- Simulate variants from frames.csv (writes `variants.csv`):
+
+```bash
+julia --project=src src/simulate_variants.jl /Users/e.smith.5/Desktop/CD8scape_example_copy
+# optional flags: --n 1000  |  --p 0.1  |  --seed 42
+```
+
+- Generate and clean peptides (writes `peptides_labels.csv` and `Peptides.pep`):
+
+```bash
+julia --project=src src/generate_peptides.jl /Users/e.smith.5/Desktop/CD8scape_example_copy
+julia --project=src src/clean_peptides.jl   /Users/e.smith.5/Desktop/CD8scape_example_copy
+```
+
+- Run NetMHCpan over peptides (writes `netMHCpan_output.tsv`):
+   - For specific alleles, ensure `alleles.txt` exists in the folder; NetMHCpan path set in `src/settings.txt`.
+
+```bash
+julia --project=src src/run_netMHCpan.jl --folder /Users/e.smith.5/Desktop/CD8scape_example_copy
+```
+
+- Run NetMHCpan with global supertype panel:
+
+```bash
+julia --project=src src/run_netMHCpan_global.jl --folder /Users/e.smith.5/Desktop/CD8scape_example_copy
+```
+
+- Parse a VCF to variants.csv (if using VCF instead of simulation):
+
+```bash
+julia --project=src src/parse_vcf.jl /Users/e.smith.5/Desktop/CD8scape_example_copy
+```
 # CD8scape
 
 CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or representative supertype panels.
@@ -83,7 +124,7 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 - Parses reading frames (writes `frames.csv`) and generates exhaustive simulated single-nucleotide variants per reading frame (writes `variants.csv`).
 - Sampling options:
    - `--n <count>`: sample an absolute number of variants.
-   - `--p <proportion>` (alias `--prop`): sample a proportion in (0,1].
+   - `--p <proportion>` (alias `--prop`): sample a proportion in (0,1).
    - If both `--n` and `--p` are provided, `--n` takes precedence.
  - Defaults: `--n` defaults to `1000` and `--p` defaults to `0.1` when you choose to sample by count or proportion; no sampling flags writes all variants. `--seed` sets RNG seed (default: `1320`).
 
@@ -112,17 +153,18 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 - `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
 - `best_ranks.csv`, `harmonic_mean_best_ranks.csv`: Best ranks and fold change analysis
+
+
+## Removed
+- The context-based pipeline under `src/context_run` was removed in favor of the simulation workflow.
  
 
 ## Citation
-
 If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
 
 Example data is from:
-
 Stanevich, O.V., Alekseeva, E.I., Sergeeva, M. et al. SARS-CoV-2 escape from cytotoxic T cells during long-term COVID-19. Nat Commun 14, 149 (2023). https://doi.org/10.1038/s41467-022-34033-x
+
 
 ## License
 GNU Public License
-## Removed
-- The context-based pipeline under `src/context_run` was removed in favor of the simulation workflow.
