@@ -1,7 +1,14 @@
 using Pkg
 
-# Activate the environment in the current directory silently
-Pkg.activate(".", io = devnull)
+# Activate the src environment explicitly (so prep works from any cwd)
+Pkg.activate(@__DIR__, io = devnull)
+
+# Ensure the environment has a valid Project/Manifest
+try
+    Pkg.resolve(; io = devnull)
+catch
+    # Ignore resolve issues; we'll instantiate/add below
+end
 
 import Base.Filesystem: isexecutable
 
@@ -17,7 +24,18 @@ required_packages = [
     "StatsBase",
 ]
 
-installed = keys(Pkg.dependencies())
+installed = try
+    keys(Pkg.dependencies())
+catch
+    # If manifest is missing, instantiate then retry
+    Pkg.instantiate(; io = devnull)
+    try
+        keys(Pkg.dependencies())
+    catch
+        # Fallback: treat as empty set
+        Base.KeySet{String, Dict{String, Pkg.Types.PackageEntry}}(Dict{String, Pkg.Types.PackageEntry}())
+    end
+end
 
 for pkg in required_packages
     if !(pkg in installed)
