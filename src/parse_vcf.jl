@@ -19,7 +19,7 @@ import Base.Filesystem: splitext, dirname, basename, joinpath, readdir
 function main()
     # Ensure the user provided a folder path
     if length(ARGS) < 1
-        println("Usage: julia script.jl <folder_path>")
+        println("Usage: julia parse_vcf.jl <folder_path>")
         return
     end
 
