@@ -1,5 +1,17 @@
 #!/usr/bin/env julia
 """
+Lightweight status logger. When `overwrite=true`, uses a carriage return
+without newline to update the same line; otherwise prints a newline.
+"""
+function status(msg; overwrite=false)
+    if overwrite
+        print("\r", msg)
+        flush(stdout)
+    else
+        println(msg)
+    end
+end
+"""
 run_netMHCpan_global.jl
 
 Runs NetMHCpan for all peptides using a global supertype panel.
@@ -238,8 +250,7 @@ function main()
             processed_before_chunk = total_alleles * cumulative_lengths[chunk_idx]
             processed_in_current = allele_idx * length(chunk_peps)
             percent_done = Int(floor(100 * (processed_before_chunk + processed_in_current) / total_work))
-            print("\rRunning chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete.")
-            flush(stdout)
+            status("Running chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete."; overwrite=true)
             try
                 run(pipeline(cmd, stdout=devnull, stderr=devnull))
                 if !isfile(temp_out_file)
@@ -250,14 +261,14 @@ function main()
                 exit(1)
             end
             # Parse NetMHCpan output and update cache (wide format)
-            # ...existing code...
+            # (Parsing handled below when merging outputs)
         end
         append!(temp_out_files, temp_out_files_chunk)
     end
     # Merge all temp output files into final netmhcpan_output.tsv
     # Ensure the progress line ends with a newline before merging message
     print("\n")
-    println("Merging chunk outputs into $xlsfile_path ...")
+    status("Merging chunk outputs into $xlsfile_path ...")
     open(xlsfile_path, "w") do out_io
         for (i, temp_file) in enumerate(temp_out_files)
             open(temp_file, "r") do in_io
@@ -270,9 +281,9 @@ function main()
             end
         end
     end
-    println("Merged output written to $xlsfile_path")
+    status("Merged output written to $xlsfile_path")
     # Cleanup temp files
-    println("Cleaning up temporary files...")
+    status("Cleaning up temporary files...")
     # Remove all temp peptides and NetMHCpan output files matching patterns (including extra underscores/numbers)
     for f in readdir(folder_path)
         if (startswith(f, "_temp_peptides") && endswith(f, ".pep")) || (startswith(f, "_temp_netMHCpan_output") && endswith(f, ".tsv"))
