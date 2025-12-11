@@ -13,24 +13,25 @@ Arguments:
 
 using DataFrames, CSV, Statistics, StatsBase
 
-# Parse command-line argument for input folder
-if length(ARGS) != 1
-    println("Usage: julia script.jl <folder_path>")
-    exit(1)
-end
+if abspath(PROGRAM_FILE) == @__FILE__
+    # Parse command-line argument for input folder
+    if length(ARGS) != 1
+        println("Usage: julia process_best_ranks.jl <folder_path>")
+        exit(1)
+    end
 
-folder_path = ARGS[1]
-input_file = joinpath(folder_path, "processed_peptides.csv")
-println("Reading input file: $input_file")
+    folder_path = ARGS[1]
+    input_file = joinpath(folder_path, "processed_peptides.csv")
+    println("Reading input file: $input_file")
 
-# Read the input CSV into a DataFrame with error handling
-try
-    global df = CSV.read(input_file, DataFrame)
-    println("Successfully loaded data with $(nrow(df)) rows")
-catch e
-    println("Error reading input file: $e")
-    exit(1)
-end
+    # Read the input CSV into a DataFrame with error handling
+    try
+        global df = CSV.read(input_file, DataFrame)
+        println("Successfully loaded data with $(nrow(df)) rows")
+    catch e
+        println("Error reading input file: $e")
+        exit(1)
+    end
 
 # Function to find minimum EL_Rank by Locus and MHC for given peptide pattern
 function find_best_ranks(df, pattern)
@@ -63,56 +64,53 @@ function find_best_ranks(df, pattern)
 end
 
 # Find best ranks separately for consensus (_C) and variant (_V) peptides
-println("Calculating best ranks for consensus peptides (_C)...")
-best_C = find_best_ranks(df, "_C")
-best_C.Peptide_Type .= "C"
-println("Found best ranks for consensus peptides: $(nrow(best_C)) entries")
+    println("Calculating best ranks for consensus peptides (_C)...")
+    best_C = find_best_ranks(df, "_C")
+    best_C.Peptide_Type .= "C"
+    println("Found best ranks for consensus peptides: $(nrow(best_C)) entries")
 
-println("Calculating best ranks for variant peptides (_V)...")
-best_V = find_best_ranks(df, "_V")
-best_V.Peptide_Type .= "V"
-println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
+    println("Calculating best ranks for variant peptides (_V)...")
+    best_V = find_best_ranks(df, "_V")
+    best_V.Peptide_Type .= "V"
+    println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
 
 
 # Combine consensus and variant results
-best_ranks = vcat(best_C, best_V)
+    best_ranks = vcat(best_C, best_V)
 
 # --- Map Locus to protein Description from frames.csv ---
-frames_file = joinpath(folder_path, "frames.csv")
-if isfile(frames_file)
-    frames_df = CSV.read(frames_file, DataFrame)
-    # Extract start positions from Region (assume first number is start)
-    function region_to_start(region)
-        # Handles both "start,end" and "start1,end1;start2,end2" cases
-        split(strip(string(region)), ";")[1] |> x -> split(x, ",")[1] |> y -> parse(Int, y)
+    frames_file = joinpath(folder_path, "frames.csv")
+    if isfile(frames_file)
+        frames_df = CSV.read(frames_file, DataFrame)
+        function region_to_start(region)
+            split(strip(string(region)), ";")[1] |> x -> split(x, ",")[1] |> y -> parse(Int, y)
+        end
+    else
+        println("Warning: frames.csv not found in $folder_path. Protein labels will not be mapped.")
     end
-    # No longer override Description from frames; retain mutation and protein label from Peptide_label
-else
-    println("Warning: frames.csv not found in $folder_path. Protein labels will not be mapped.")
-end
 
 # Reorder to put Locus then Description first
-best_ranks = select(best_ranks, :Locus, :Description, Not([:Locus, :Description]))
+    best_ranks = select(best_ranks, :Locus, :Description, Not([:Locus, :Description]))
 
 # Final tidy on Description: remove any trailing underscores and numeric suffixes
-best_ranks.Description = replace.(best_ranks.Description, r"_\d+$" => "")
-best_ranks.Description = replace.(best_ranks.Description, r"_+$" => "")
+    best_ranks.Description = replace.(best_ranks.Description, r"_\d+$" => "")
+    best_ranks.Description = replace.(best_ranks.Description, r"_+$" => "")
 
 # Compute one Description per Locus: prefer current cleaned, otherwise first seen
-description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-    (; Locus = sdf.Locus[1], Description = sdf.Description[1])
-end
+    description_roots = combine(groupby(best_ranks, :Locus)) do sdf
+        (; Locus = sdf.Locus[1], Description = sdf.Description[1])
+    end
 
 # Save best_ranks.csv
-best_ranks_file = joinpath(folder_path, "best_ranks.csv")
-CSV.write(best_ranks_file, best_ranks)
-println("Saved best ranks to $best_ranks_file")
+    best_ranks_file = joinpath(folder_path, "best_ranks.csv")
+    CSV.write(best_ranks_file, best_ranks)
+    println("Saved best ranks to $best_ranks_file")
 
 # Pivot best_ranks to have separate columns for HMBR_C and HMBR_V
-println("Calculating harmonic mean best ranks (HMBR) for each locus...")
-if !isempty(best_ranks)
-    pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
-        :Best_EL_Rank => harmmean => :HMBR), :Peptide_Type, :HMBR)
+    println("Calculating harmonic mean best ranks (HMBR) for each locus...")
+    if !isempty(best_ranks)
+        pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
+            :Best_EL_Rank => harmmean => :HMBR), :Peptide_Type, :HMBR)
     # Only rename columns if they exist
     colnames = names(pivot_df)
     rename_pairs = Pair{Symbol,Symbol}[]
@@ -186,6 +184,7 @@ if !isempty(best_ranks)
         println("Minimal test CSV written to $minimal_test_file")
     else
     end
-else
-    println("No valid best rank data available. Skipping harmonic mean calculations.")
+    else
+        println("No valid best rank data available. Skipping harmonic mean calculations.")
+    end
 end
