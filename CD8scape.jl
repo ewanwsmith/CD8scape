@@ -15,18 +15,19 @@ function print_help()
 CD8scape.jl - A tool for running netMHCpan and managing related data.
 
 USAGE:
-  ./CD8scape.jl prep
-  ./CD8scape.jl read <folder_path>
-  ./CD8scape.jl run  <folder_path>
-  ./CD8scape.jl run_supertype  <folder_path>
+    ./CD8scape.jl prep
+    ./CD8scape.jl read <folder_path>
+    ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
+    ./CD8scape.jl run  <folder_path>
+    ./CD8scape.jl run_supertype  <folder_path>
   
 
 COMMANDS:
-  prep    Set up the environment by running src/env.jl.
-  read    Attempt to parse variants input (samfire trajectories or .vcf) and read frames (SamFire or NCBI).
-  simulate Generate frames and exhaustive amino-acid variant set per frame.
-  run     Run the peptide-generation and NetMHCpan pipeline on parsed data.
-  run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertpe HLA panel.
+    prep         Set up the environment by running src/env.jl.
+    read         Parse variants input (Samfire trajectories or .vcf) and read frames (SamFire or NCBI).
+    simulate     Read frames, then generate and optionally sample simulated variants per frame.
+    run          Run the peptide-generation and NetMHCpan pipeline on parsed data.
+    run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertype HLA panel.
   
 
 OPTIONS:
