@@ -116,20 +116,27 @@ if abspath(PROGRAM_FILE) == @__FILE__
     end
 
 # -----------------------------
-# Compute best ranks per (Locus, MHC) for C and V peptides
+# Compute best ranks per (Locus, MHC, Change) for C and V peptides
 # -----------------------------
 
 function find_best_ranks(df, pattern)
-    subset = filter(row -> endswith(row.Peptide_label, pattern), df)
+    subset = filter(row -> !ismissing(row.Peptide_label) && endswith(String(row.Peptide_label), pattern), df)
     if isempty(subset)
         println("Warning: No peptides found for pattern '$pattern'")
-        return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
+        return DataFrame(Frame = String[], Locus = Int[], MHC = String[], Mutation = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Sequence = String[])
     end
-    grouped = groupby(subset, [:Locus, :MHC])
+    # Derive Mutation and Frame from Peptide_label
+    keys = replace.(subset.Peptide_label, r"_(C|V|A|D)$" => "")
+    keys = replace.(keys, r"_\d+$" => "")
+    keys = replace.(keys, ' ' => '_')
+    subset[!, :Mutation] = String.(first.(split.(keys, "_")))
+    subset[!, :Frame] = String.(last.(split.(keys, "_")))
+
+    grouped = groupby(subset, [:Frame, :Locus, :MHC, :Mutation])
     best_rows = combine(grouped) do sdf
         idx = argmin(sdf.EL_Rank)
         (; Best_EL_Rank = sdf.EL_Rank[idx],
-           Description = sdf.Peptide_label[idx],
+           Frame = String(sdf.Frame[idx]),
            Sequence = sdf.Peptide[idx])
     end
     return best_rows
@@ -147,11 +154,8 @@ end
 
 best_ranks = vcat(best_C, best_V)
 
-# Clean descriptions to remove trailing suffix (e.g., _C, _V, _1)
-best_ranks.Description = [replace(strip(string(s)), r"_[^_]*$" => "") for s in best_ranks.Description]
-
-# Reorder to put Locus then Description first
-best_ranks = select(best_ranks, :Locus, :Description, Not([:Locus, :Description]))
+# Keep Frame, Locus, Mutation for downstream grouping
+best_ranks = select(best_ranks, :Frame, :Locus, :Mutation, :MHC, :Best_EL_Rank, :Peptide_Type, :Sequence)
 
 # Compute shared Description root per Locus
 function shared_prefix(strings)
@@ -175,9 +179,7 @@ function shared_prefix(strings)
     return prefix
 end
 
-description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-    (; Locus = sdf.Locus[1], Description = shared_prefix(sdf.Description))
-end
+# No description mapping needed; Frame already present
 
 # Save best_ranks.csv
 best_ranks_file = joinpath(folder_path, "best_ranks.csv")
@@ -188,7 +190,7 @@ println("Saved best ranks to $best_ranks_file")
 # Weighted HMBR using supertype_panel.csv
 # -----------------------------
 
-println("Calculating weighted harmonic mean best ranks (HMBR) for each locus...")
+println("Calculating weighted harmonic mean best ranks (HMBR) per Frame/Locus...")
 if !isempty(best_ranks)
     freq_path = joinpath(folder_path, "supertype_panel.csv")
     if !isfile(freq_path)
@@ -322,40 +324,39 @@ if !isempty(best_ranks)
     end
     # === DEBUG WEIGHTS END ===
 
-    # Compute weighted harmonic mean per (Locus, Peptide_Type) using per-row allele in best_ranks.MHC
-    grouped = groupby(best_ranks, [:Locus, :Peptide_Type])
+    # Compute weighted harmonic mean per (Frame, Locus, Mutation, Peptide_Type)
+    grouped = groupby(best_ranks, [:Frame, :Locus, :Mutation, :Peptide_Type])
     agg = combine(grouped) do sdf
         (; HMBR = hmean_from_group(Float64.(sdf.Best_EL_Rank), sdf.MHC, wmap))
     end
 
     # Pivot to separate C and V (HMBR only)
     pivot_df = unstack(agg, :Peptide_Type, :HMBR)
-    rename!(pivot_df, Dict("C" => "HMBR_C", "V" => "HMBR_V"))
+    rename!(pivot_df, Dict("C" => "HMBR_A", "V" => "HMBR_D"))
 
     # Identify and report missing values before fold change calculation
     for row in eachrow(pivot_df)
-        if ismissing(row.HMBR_C)
+        if ismissing(row.HMBR_A)
             println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank or weights.")
-        elseif ismissing(row.HMBR_V)
+        elseif ismissing(row.HMBR_D)
             println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank or weights.")
         end
     end
 
     before_filter = nrow(pivot_df)
     pivot_df = filter(row ->
-        !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) &&
-        !(row.HMBR_C > 2 && row.HMBR_V > 2),
+        !ismissing(row.HMBR_A) && !ismissing(row.HMBR_D) &&
+        !(row.HMBR_A > 2 && row.HMBR_D > 2),
         pivot_df
     )
     removed_count = before_filter - nrow(pivot_df)
     println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
 
     # Fold change V/C
-    pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+    pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
 
-    # Attach Description and reorder columns (keep original output schema)
-    pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
-    pivot_df = select(pivot_df, :Locus, :Description, :HMBR_C, :HMBR_V, :foldchange_HMBR)
+    # Reorder columns to requested schema
+    pivot_df = select(pivot_df, :Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR)
 
     # Save results
     harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv")

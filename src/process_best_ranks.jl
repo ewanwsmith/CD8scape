@@ -33,12 +33,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
         exit(1)
     end
 
-# Function to find minimum EL_Rank by Locus and MHC for given peptide pattern
+# Function to find minimum EL_Rank by Locus, MHC, and AA change for given peptide pattern
 function find_best_ranks(df, pattern)
     subset = filter(row -> !ismissing(row.Peptide_label) && endswith(row.Peptide_label, pattern), df)
     if isempty(subset)
         println("Warning: No peptides found for pattern '$pattern'")
-        return DataFrame(Locus = Int[], MHC = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
+        return DataFrame(Locus = Int[], MHC = String[], Change = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
     end
     # Coerce EL_Rank column to Float64 if not already
     if !(eltype(subset.EL_Rank) <: AbstractFloat)
@@ -48,17 +48,25 @@ function find_best_ranks(df, pattern)
             NaN
         end, subset.EL_Rank)
     end
-    grouped = groupby(subset, [:Locus, :MHC])
+    # Derive AA change key from Peptide_label (e.g., "A17T" from "A17T_ProteinName_3_ D")
+    change_keys = replace.(subset.Peptide_label, r"_(C|V|A|D)$" => "")
+    change_keys = replace.(change_keys, r"_\d+$" => "")
+    change_keys = replace.(change_keys, ' ' => '_')
+    subset[!, :Mutation] = String.(first.(split.(change_keys, "_")))
+
+    grouped = groupby(subset, [:Locus, :MHC, :Mutation])
     best_rows = combine(grouped) do sdf
         idx = argmin(sdf.EL_Rank)
-        raw_desc = String(sdf.Peptide_label[idx])
-        # Keep mutation info; remove trailing _A/_D (legacy: _C/_V), strip numeric suffix (e.g. _17), and replace spaces with underscores
-        cleaned_desc = replace(raw_desc, r"_(C|V|A|D)$" => "")
-        cleaned_desc = replace(cleaned_desc, r"_\d+$" => "")
-        cleaned_desc = replace(cleaned_desc, ' ' => '_')
-        (; Best_EL_Rank = sdf.EL_Rank[idx],
-           Description = cleaned_desc,
-           Sequence = sdf.Peptide[idx])
+          raw_desc = String(sdf.Peptide_label[idx])
+          cleaned = replace(raw_desc, r"_(C|V|A|D)$" => "")
+          cleaned = replace(cleaned, r"_\d+$" => "")
+          cleaned = replace(cleaned, ' ' => '_')
+          # Frame is the last part after underscores
+          parts = split(cleaned, "_")
+          frame = parts[end]
+          (; Best_EL_Rank = sdf.EL_Rank[idx],
+              Frame = frame,
+              Sequence = sdf.Peptide[idx])
     end
     return best_rows
 end
@@ -89,18 +97,16 @@ end
         println("Warning: frames.csv not found in $folder_path. Protein labels will not be mapped.")
     end
 
-# Reorder to put Locus then Description first
-    best_ranks = select(best_ranks, :Locus, :Description, Not([:Locus, :Description]))
+# Reorder: put Frame, Locus, Mutation first
+    best_ranks = select(best_ranks, :Frame, :Locus, :Mutation, Not([:Frame, :Locus, :Mutation]))
 
-# Final tidy on Description: remove any trailing underscores and numeric suffixes
-    best_ranks.Description = replace.(best_ranks.Description, r"_\d+$" => "")
-    best_ranks.Description = replace.(best_ranks.Description, r"_+$" => "")
+    # Frame already derived from label; no further cleanup needed
 
-# Compute one Description per Locus: prefer current cleaned, otherwise first seen
-    description_roots = DataFrame(Locus=Int[], Description=String[])
+# Compute one Frame per (Locus, Mutation): prefer current cleaned, otherwise first seen
+    description_roots = DataFrame(Locus=Int[], Mutation=String[], Frame=String[])
     if !isempty(best_ranks)
-        description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-            (; Locus = sdf.Locus[1], Description = sdf.Description[1])
+        description_roots = combine(groupby(best_ranks, [:Locus, :Mutation])) do sdf
+            (; Locus = sdf.Locus[1], Mutation = sdf.Mutation[1], Frame = sdf.Frame[1])
         end
     end
 
@@ -110,10 +116,12 @@ end
     println("Saved best ranks to $best_ranks_file")
 
 # Pivot best_ranks to have separate columns for HMBR_A and HMBR_D
-    println("Calculating harmonic mean best ranks (HMBR) for each locus...")
+    println("Calculating harmonic mean best ranks (HMBR) per Frame/Locus/Mutation...")
     if !isempty(best_ranks)
-        pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
-            :Best_EL_Rank => harmmean => :HMBR), :Peptide_Type, :HMBR)
+        pivot_df = unstack(
+            combine(groupby(best_ranks, [:Frame, :Locus, :Mutation, :Peptide_Type]),
+                    :Best_EL_Rank => harmmean => :HMBR),
+            :Peptide_Type, :HMBR)
     # Only rename columns if they exist
     colnames = names(pivot_df)
     rename_pairs = Pair{Symbol,Symbol}[]
@@ -132,13 +140,20 @@ end
         println("Warning: No derived peptides found. Skipping fold change calculations and HMBR_D output.")
     end
 
-    # Identify and report missing values before fold change calculation
+    # Identify and report missing values before fold change calculation (per Locus, Mutation)
+    missing_msgs = Set{Tuple{Int,String,String}}()  # (Locus, Mutation, which)
     for row in eachrow(pivot_df)
+        locus = row.Locus
+        change = get(row, :Mutation, "?")
         if ismissing(get(row, :HMBR_A, missing))
-            println("Fold change could not be calculated for locus $(row.Locus) due to missing ancestral rank.")
-        elseif ismissing(get(row, :HMBR_D, missing))
-            println("Fold change could not be calculated for locus $(row.Locus) due to missing derived rank.")
+            push!(missing_msgs, (locus, String(change), "ancestral"))
         end
+        if ismissing(get(row, :HMBR_D, missing))
+            push!(missing_msgs, (locus, String(change), "derived"))
+        end
+    end
+    for (locus, change, which) in missing_msgs
+        println("Fold change could not be calculated for locus $(locus) (change $(change)) due to missing $(which) rank.")
     end
 
     # Filter out loci where both HMBR_A and HMBR_D are greater than 2 (non-binding)
@@ -155,14 +170,10 @@ end
         println("DEBUG: Cannot calculate foldchange_HMBR or log2_foldchange_HMBR due to missing columns.")
     end
 
-    # Compute shared Description root per Locus
-    pivot_df = leftjoin(pivot_df, description_roots, on = :Locus)
+    # Frame is already present from grouping; no join needed
 
     # Keep Description exactly as mapped; ensure no trailing underscores or numeric suffixes
-    if :Description in names(pivot_df)
-        pivot_df.Description = replace.(pivot_df.Description, r"_\d+$" => "")
-        pivot_df.Description = replace.(pivot_df.Description, r"_+$" => "")
-    end
+    # No further cleanup needed for Frame
 
     # Calculate fold change and log2 after all joins/cleaning
     if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
@@ -171,7 +182,7 @@ end
     end
 
     # Prepare final output columns (use already computed values)
-    output_cols = [:Locus, :Description, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
+    output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
     pivot_df = select(pivot_df, output_cols...)
 
     # Save harmonic mean results with fold change
