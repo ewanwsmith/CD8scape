@@ -30,6 +30,8 @@ function parse_arguments()
     for (i, arg) in enumerate(ARGS)
         if arg in ["--folder", "-f"]
             args["folder"] = ARGS[i + 1]
+        elseif arg == "--verbose"
+            args["verbose"] = true
         end
     end
     if !haskey(args, "folder")
@@ -88,6 +90,7 @@ end
 function main()
     args = parse_arguments()
     folder_path = args["folder"]
+    verbose = get(args, "verbose", false)
 
     netMHCpan_exe = get_netMHCpan_executable()
     println("Using NetMHCpan executable: ", netMHCpan_exe)
@@ -159,7 +162,14 @@ function main()
             percent_done = Int(floor(100 * (processed_before_chunk + processed_in_current) / total_work))
             status("Running chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete."; overwrite=true)
             try
-                run(pipeline(cmd, stdout=devnull, stderr=devnull))
+                if verbose
+                    allele_log = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt")
+                    open(allele_log, "w") do log_io
+                        run(pipeline(cmd, stdout=log_io, stderr=log_io))
+                    end
+                else
+                    run(pipeline(cmd, stdout=devnull, stderr=devnull))
+                end
                 if !isfile(temp_out_file)
                     error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
                 end
@@ -188,15 +198,44 @@ function main()
     end
     # Cleanup temp files
     status("Cleaning up temporary files...")
+    del_pep = 0; del_out = 0; del_logs = 0
+    keep_pep = 0; keep_out = 0; keep_logs = 0
+    kept_logs_list = String[]
     for f in readdir(folder_path)
-        if (startswith(f, "_temp_peptides") && endswith(f, ".pep")) || (startswith(f, "_temp_netMHCpan_output") && endswith(f, ".tsv"))
-            temp_path = joinpath(folder_path, f)
-            if isfile(temp_path)
-                rm(temp_path; force=true)
+        pep = (startswith(f, "_temp_peptides") && endswith(f, ".pep"))
+        out = (startswith(f, "_temp_netMHCpan_output") && endswith(f, ".tsv"))
+        log = (startswith(f, "_temp_netMHCpan_log") && endswith(f, ".txt"))
+        temp_path = joinpath(folder_path, f)
+        if pep
+            if verbose
+                keep_pep += 1
+            elseif isfile(temp_path)
+                try; rm(temp_path; force=true); del_pep += 1; catch; end
+            end
+        elseif out
+            if verbose
+                keep_out += 1
+            elseif isfile(temp_path)
+                try; rm(temp_path; force=true); del_out += 1; catch; end
+            end
+        elseif log
+            if verbose
+                keep_logs += 1
+                push!(kept_logs_list, f)
+            elseif isfile(temp_path)
+                try; rm(temp_path; force=true); del_logs += 1; catch; end
             end
         end
     end
-    println("Temporary files deleted.")
+    if verbose
+        shown = min(length(kept_logs_list), 10)
+        remaining = length(kept_logs_list) - shown
+        shown_list = kept_logs_list[1:shown]
+        msg = "Cleanup summary (verbose): kept peptides=$(keep_pep), kept outputs=$(keep_out), kept logs=$(keep_logs). Deleted peptides=$(del_pep), outputs=$(del_out), logs=$(del_logs). Kept logs (showing $(shown)" * (remaining > 0 ? ", +$(remaining) more" : "") * "): "
+        println(msg, join(shown_list, ", "))
+    else
+        println("Cleanup summary: deleted peptides=$(del_pep), outputs=$(del_out), logs=$(del_logs).")
+    end
 end
 
 main()
