@@ -33,15 +33,31 @@ function main()
     # Keep only POS, REF, ALT columns
     select!(vcf_dataframe, [:POS, :REF, :ALT])
 
+    # Expand multi-allelic ALT (comma-separated) into one row per ALT.
+    # Also filter to SNVs (single-base REF and ALT) to match downstream expectations.
+    expanded = DataFrame(POS=Int[], REF=String[], ALT=String[])
+    for r in eachrow(vcf_dataframe)
+        ref = String(r[:REF])
+        # ALT may be comma-separated
+        alts = split(String(r[:ALT]), ",")
+        for alt in alts
+            alt_str = String(alt)
+            # Keep only SNVs: single-base REF and ALT, A/C/G/T
+            if length(ref) == 1 && length(alt_str) == 1 && occursin(r"^[ACGTacgt]$", ref) && occursin(r"^[ACGTacgt]$", alt_str)
+                push!(expanded, (Int(r[:POS]), uppercase(ref), uppercase(alt_str)))
+            end
+        end
+    end
+
     # Rename columns:
     #   POS  -> Locus
     #   REF  -> Consensus
     #   ALT  -> Variant
-    rename!(vcf_dataframe, :POS => :Locus, :REF => :Consensus, :ALT => :Variant)
+    rename!(expanded, :POS => :Locus, :REF => :Consensus, :ALT => :Variant)
 
     # Write out the CSV named 'variants.csv' in the same folder
     output_file_path = joinpath(folder_path, "variants.csv")
-    CSV.write(output_file_path, vcf_dataframe)
+    CSV.write(output_file_path, expanded)
     println("DataFrame saved as $output_file_path")
 end
 
