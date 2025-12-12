@@ -1,4 +1,5 @@
 using Pkg
+using TOML
 
 # Activate the src environment explicitly (so prep works from any cwd)
 Pkg.activate(@__DIR__, io = devnull)
@@ -12,17 +13,43 @@ end
 
 import Base.Filesystem: isexecutable
 
-# Ensure that Project.toml exists and includes needed packages
-# Only needed the first time you run the script or when updating dependencies
-required_packages = [
-    "DataFrames",
-    "CSV",
-    "FilePathsBase",
-    "ArgParse",
-    "CodecZlib",
-    "Statistics",
-    "StatsBase",
-]
+"""
+Collect dependency names from top-level `Project.toml` and `src/Project.toml`.
+Falls back gracefully if a file is missing.
+"""
+function collect_declared_deps()
+    dep_names = Set{String}()
+    # Candidates: project root and src env
+    root_proj = abspath(joinpath(@__DIR__, "..", "Project.toml"))
+    src_proj  = abspath(joinpath(@__DIR__, "Project.toml"))
+    for path in (root_proj, src_proj)
+        if isfile(path)
+            try
+                tbl = TOML.parsefile(path)
+                if haskey(tbl, "deps")
+                    for (name, _) in tbl["deps"]
+                        push!(dep_names, String(name))
+                    end
+                end
+            catch
+                # ignore parse errors and continue
+            end
+        end
+    end
+    # If no files found or empty, use minimal required set for this pipeline
+    if isempty(dep_names)
+        dep_names = Set([
+            "DataFrames",
+            "CSV",
+            "FilePathsBase",
+            "ArgParse",
+            "CodecZlib",
+            "Statistics",
+            "StatsBase",
+        ])
+    end
+    return collect(dep_names)
+end
 
 installed = try
     keys(Pkg.dependencies())
@@ -37,6 +64,7 @@ catch
     end
 end
 
+required_packages = collect_declared_deps()
 for pkg in required_packages
     if !(pkg in installed)
         Pkg.add(pkg; io = devnull)
