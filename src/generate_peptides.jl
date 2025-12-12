@@ -312,8 +312,10 @@ function separate_peptides(df::DataFrame)::DataFrame
 end
 
 function deduplicate_peptides(df::DataFrame)::DataFrame
+    # Preserve distinct AA changes per locus: include full Peptide_label in dedup key
+    # so that ancestral peptides shared across multiple variants are not collapsed.
     df[!, :State] = last.(split.(df.Peptide_label, "_"))
-    dedup_df = unique(df, [:Locus, :Peptide, :State])
+    dedup_df = unique(df, [:Locus, :Peptide, :State, :Peptide_label])
     select!(dedup_df, Not(:State))  # remove helper column
     return dedup_df
 end
