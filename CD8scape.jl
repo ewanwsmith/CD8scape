@@ -147,6 +147,7 @@ elseif command == "run"
     folder_path = ARGS[2]
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
+    skip_marker = joinpath(folder_path, ".cd8scape_skipped")
 
     # Generate Peptides
     if !safe_run(`julia --project=. src/generate_peptides.jl $folder_path`)
@@ -160,10 +161,33 @@ elseif command == "run"
         exit(1)
     end
 
+    # If no peptides remain after cleaning, skip gracefully (post-clean stage)
+    try
+        pep_file = joinpath(folder_path, "Peptides.pep")
+        if isfile(pep_file)
+            pep_lines = readlines(pep_file)
+            if isempty(pep_lines)
+                println("Skipping downstream processing: no peptides remain after cleaning.")
+                println("Run stage finished successfully (no data).")
+                exit(0)
+            end
+        end
+    catch
+        # Continue if read fails; subsequent steps will handle
+    end
+
     # Run NetMHCpan
     if !safe_run(`julia --project=. src/run_netMHCpan.jl --folder $folder_path`)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
+    end
+    # If the runner signaled skip, end process gracefully now (post-NetMHCpan)
+    if isfile(skip_marker)
+        println("Skipping downstream processing due to runner skip marker.")
+        # Clean up marker to avoid future confusion
+        try; rm(skip_marker; force=true); catch; end
+        println("Run stage finished successfully (no data).")
+        exit(0)
     end
 
     # Verify NetMHCpan Output
@@ -171,6 +195,7 @@ elseif command == "run"
         println("Error: Expected NetMHCpan output file '$netmhcpan_output' does not exist.")
         exit(1)
     end
+    # Continue regardless of number of lines; downstream scripts will handle empty outputs
 
     # Process Output with Perl Script
     try
@@ -181,6 +206,19 @@ elseif command == "run"
     catch e
         println("Error running src/process_output.pl: $e")
         exit(1)
+    end
+
+    # If processed_output has no data rows, skip remaining stages gracefully
+    try
+        lines = readlines(processed_output)
+        data_rows = length(lines) > 1 ? (length(lines) - 1) : 0
+        if data_rows == 0
+            println("Skipping downstream processing: processed_output has 0 data rows.")
+            println("Run stage finished successfully (no data).")
+            exit(0)
+        end
+    catch
+        # If reading fails, continue; subsequent steps may handle errors
     end
 
     # Process Scores
@@ -207,6 +245,8 @@ elseif command == "run_supertype"
     folder_path = ARGS[2]
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
+    # Define skip marker path for graceful early exit
+    skip_marker = joinpath(folder_path, ".cd8scape_skipped")
 
     # Generate Peptides
     if !safe_run(`julia --project=. src/generate_peptides.jl $folder_path`)
@@ -220,10 +260,33 @@ elseif command == "run_supertype"
         exit(1)
     end
 
+    # If no peptides remain after cleaning, skip gracefully (post-clean stage)
+    try
+        pep_file = joinpath(folder_path, "Peptides.pep")
+        if isfile(pep_file)
+            pep_lines = readlines(pep_file)
+            if isempty(pep_lines)
+                println("Skipping downstream processing: no peptides remain after cleaning.")
+                println("run_supertype method finished successfully (no data).")
+                exit(0)
+            end
+        end
+    catch
+        # Continue if read fails; subsequent steps will handle
+    end
+
     # Run NetMHCpan
     if !safe_run(`julia --project=. src/run_netMHCpan_global.jl --folder $folder_path`)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
+    end
+    # If the runner signaled skip, end process gracefully now (post-NetMHCpan)
+    if isfile(skip_marker)
+        println("Skipping downstream processing due to runner skip marker.")
+        # Clean up marker to avoid future confusion
+        try; rm(skip_marker; force=true); catch; end
+        println("run_supertype method finished successfully (no data).")
+        exit(0)
     end
 
     # Verify NetMHCpan Output
@@ -241,6 +304,19 @@ elseif command == "run_supertype"
     catch e
         println("Error running src/process_output.pl: $e")
         exit(1)
+    end
+
+    # If processed_output has no data rows, skip remaining stages gracefully
+    try
+        lines = readlines(processed_output)
+        data_rows = length(lines) > 1 ? (length(lines) - 1) : 0
+        if data_rows == 0
+            println("Skipping downstream processing: processed_output has 0 data rows.")
+            println("run_supertype method finished successfully (no data).")
+            exit(0)
+        end
+    catch
+        # If reading fails, continue; subsequent steps may handle errors
     end
 
     # Process Scores
