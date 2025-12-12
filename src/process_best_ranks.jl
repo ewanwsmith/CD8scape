@@ -2,7 +2,7 @@
 """
 process_best_ranks.jl
 
-Processes best ranks for consensus and variant peptides for each locus.
+Processes best ranks for ancestral and derived peptides for each locus.
 
 Usage:
     julia process_best_ranks.jl <folder_path>
@@ -52,8 +52,8 @@ function find_best_ranks(df, pattern)
     best_rows = combine(grouped) do sdf
         idx = argmin(sdf.EL_Rank)
         raw_desc = String(sdf.Peptide_label[idx])
-        # Keep mutation info; remove trailing _C/_V, strip numeric suffix (e.g. _17), and replace spaces with underscores
-        cleaned_desc = replace(raw_desc, r"_(C|V)$" => "")
+        # Keep mutation info; remove trailing _A/_D (legacy: _C/_V), strip numeric suffix (e.g. _17), and replace spaces with underscores
+        cleaned_desc = replace(raw_desc, r"_(C|V|A|D)$" => "")
         cleaned_desc = replace(cleaned_desc, r"_\d+$" => "")
         cleaned_desc = replace(cleaned_desc, ' ' => '_')
         (; Best_EL_Rank = sdf.EL_Rank[idx],
@@ -63,19 +63,19 @@ function find_best_ranks(df, pattern)
     return best_rows
 end
 
-# Find best ranks separately for consensus (_C) and variant (_V) peptides
-    println("Calculating best ranks for consensus peptides (_C)...")
-    best_C = find_best_ranks(df, "_C")
-    best_C.Peptide_Type .= "C"
-    println("Found best ranks for consensus peptides: $(nrow(best_C)) entries")
+# Find best ranks separately for ancestral (_A, legacy _C) and derived (_D, legacy _V) peptides
+    println("Calculating best ranks for ancestral peptides (_A)...")
+    best_C = find_best_ranks(df, "_A")
+    best_C.Peptide_Type .= "A"
+    println("Found best ranks for ancestral peptides: $(nrow(best_C)) entries")
 
-    println("Calculating best ranks for variant peptides (_V)...")
-    best_V = find_best_ranks(df, "_V")
-    best_V.Peptide_Type .= "V"
-    println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
+    println("Calculating best ranks for derived peptides (_D)...")
+    best_V = find_best_ranks(df, "_D")
+    best_V.Peptide_Type .= "D"
+    println("Found best ranks for derived peptides: $(nrow(best_V)) entries")
 
 
-# Combine consensus and variant results
+# Combine ancestral and derived results
     best_ranks = vcat(best_C, best_V)
 
 # --- Map Locus to protein Description from frames.csv ---
@@ -109,7 +109,7 @@ end
     CSV.write(best_ranks_file, best_ranks)
     println("Saved best ranks to $best_ranks_file")
 
-# Pivot best_ranks to have separate columns for HMBR_C and HMBR_V
+# Pivot best_ranks to have separate columns for HMBR_A and HMBR_D
     println("Calculating harmonic mean best ranks (HMBR) for each locus...")
     if !isempty(best_ranks)
         pivot_df = unstack(combine(groupby(best_ranks, [:Locus, :Peptide_Type]),
@@ -117,39 +117,39 @@ end
     # Only rename columns if they exist
     colnames = names(pivot_df)
     rename_pairs = Pair{Symbol,Symbol}[]
-    if "C" in colnames
-        push!(rename_pairs, Symbol("C") => :HMBR_C)
+    if "A" in colnames
+        push!(rename_pairs, Symbol("A") => :HMBR_A)
     end
-    if "V" in colnames
-        push!(rename_pairs, Symbol("V") => :HMBR_V)
+    if "D" in colnames
+        push!(rename_pairs, Symbol("D") => :HMBR_D)
     end
     if !isempty(rename_pairs)
         rename!(pivot_df, rename_pairs...)
     end
 
-    # Warn if no variant data is present
-    if !("HMBR_V" in names(pivot_df))
-        println("Warning: No variant peptides found. Skipping fold change calculations and HMBR_V output.")
+    # Warn if no derived data is present
+    if !("HMBR_D" in names(pivot_df))
+        println("Warning: No derived peptides found. Skipping fold change calculations and HMBR_D output.")
     end
 
     # Identify and report missing values before fold change calculation
     for row in eachrow(pivot_df)
-        if ismissing(row.HMBR_C)
-            println("Fold change could not be calculated for locus $(row.Locus) due to missing consensus rank.")
-        elseif ismissing(row.HMBR_V)
-            println("Fold change could not be calculated for locus $(row.Locus) due to missing variant rank.")
+        if ismissing(get(row, :HMBR_A, missing))
+            println("Fold change could not be calculated for locus $(row.Locus) due to missing ancestral rank.")
+        elseif ismissing(get(row, :HMBR_D, missing))
+            println("Fold change could not be calculated for locus $(row.Locus) due to missing derived rank.")
         end
     end
 
-    # Filter out loci where both HMBR_C and HMBR_V are greater than 2 (non-binding)
+    # Filter out loci where both HMBR_A and HMBR_D are greater than 2 (non-binding)
     before_filter = nrow(pivot_df)
-    pivot_df = filter(row -> !ismissing(row.HMBR_C) && !ismissing(row.HMBR_V) && !(row.HMBR_C > 2 && row.HMBR_V > 2), pivot_df)
+    pivot_df = filter(row -> !ismissing(get(row, :HMBR_A, missing)) && !ismissing(get(row, :HMBR_D, missing)) && !(get(row, :HMBR_A, 0.0) > 2 && get(row, :HMBR_D, 0.0) > 2), pivot_df)
     removed_count = before_filter - nrow(pivot_df)
     println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
 
-    # Calculate fold change (Derived (_V) / Ancestral (_C)) for all valid rows
-    if ("HMBR_C" in names(pivot_df)) && ("HMBR_V" in names(pivot_df))
-        pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+    # Calculate fold change (Derived (_D) / Ancestral (_A)) for all valid rows
+    if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
+        pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
         pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
     else
         println("DEBUG: Cannot calculate foldchange_HMBR or log2_foldchange_HMBR due to missing columns.")
@@ -165,13 +165,13 @@ end
     end
 
     # Calculate fold change and log2 after all joins/cleaning
-    if ("HMBR_C" in names(pivot_df)) && ("HMBR_V" in names(pivot_df))
-        pivot_df.foldchange_HMBR = pivot_df.HMBR_V ./ pivot_df.HMBR_C
+    if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
+        pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
         pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
     end
 
     # Prepare final output columns (use already computed values)
-    output_cols = [:Locus, :Description, :HMBR_C, :HMBR_V, :foldchange_HMBR, :log2_foldchange_HMBR]
+    output_cols = [:Locus, :Description, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
     pivot_df = select(pivot_df, output_cols...)
 
     # Save harmonic mean results with fold change
