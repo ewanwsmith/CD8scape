@@ -130,7 +130,8 @@ function main()
     end
     representatives_file = find_representatives_file(folder_path)
     peptides_file = joinpath(folder_path, "Peptides.pep")
-    xlsfile_path = joinpath(folder_path, "netMHCpan_output.tsv")
+    # Use lowercase filename to match downstream Perl script expectation
+    xlsfile_path = joinpath(folder_path, "netmhcpan_output.tsv")
     cache_file = joinpath(folder_path, "results_cache.jls")
 
     # Check if required files exist
@@ -152,6 +153,11 @@ function main()
     # Read peptides
     peptide_list = open(peptides_file) do file
         [strip(line) for line in readlines(file) if !isempty(strip(line))]
+    end
+
+    # If all peptides were dropped upstream, note and continue; downstream will handle
+    if isempty(peptide_list)
+        println("No peptides remaining after filtering (synonymity/stop codons).")
     end
 
 
@@ -186,6 +192,7 @@ function main()
         error("ERROR: Column 'Allele' not found in $(representatives_file). Columns present: $cols")
     end
     freq_col = _find_col(df, "frequency")
+    locus_col = _find_col(df, "locus")
     
     # Optional Frequency filtering if present (accepts string or number)
     if freq_col !== nothing
@@ -209,9 +216,51 @@ function main()
         return s
     end
     df[!, allele_col] = map(a -> a === missing ? missing : clean_allele(a), df[!, allele_col])
+
+    # Identify alleles with trailing IMGT/HLA suffix letters (N, L, S, C, A, Q, G, P, etc.)
+    # Examples: HLA-A*02:01N, HLA-B*07:02G
+    function has_suffix(a)
+        s = String(a)
+        return occursin(r"(:\d{2})(?:[:\d{2}]*)?[A-Z]$", s)
+    end
+    suffix_mask = map(a -> a === missing ? false : has_suffix(a), df[!, allele_col])
+    removed_count = count(suffix_mask)
+    if removed_count > 0
+        println("Removing $(removed_count) alleles with suffix letters and reweighting panel")
+        df = df[.!suffix_mask, :]
+        # Reweight frequencies: if locus present, normalize per locus; otherwise global normalize
+        if freq_col !== nothing
+            if locus_col !== nothing
+                # group by locus and renormalize frequency to sum to original per locus sums
+                # First compute sums per locus before removal (from original df including removed rows)
+                # We reconstruct original sums using current df plus removed rows frequencies if available.
+                # Simpler: normalize so that within each locus the remaining frequencies sum to 1.0
+                grp = groupby(df, locus_col)
+                for g in grp
+                    total = sum(skipmissing(g[!, freq_col]))
+                    if total > 0
+                        g[!, freq_col] .= g[!, freq_col] ./ total
+                    end
+                end
+                df = combine(grp, names(df) .=> identity)
+            else
+                total = sum(skipmissing(df[!, freq_col]))
+                if total > 0
+                    df[!, freq_col] .= df[!, freq_col] ./ total
+                end
+            end
+        end
+    end
     
+    # Filter out only NA/missing/empty entries; do not restrict to NetMHCpan lists
+    valid_mask = map(a -> a !== missing && !isempty(strip(String(a))) && lowercase(strip(String(a))) ∉ ("na", "nan", "missing"), df[!, allele_col])
+    dropped_invalid = count(.!valid_mask)
+    if dropped_invalid > 0
+        println("Dropping $(dropped_invalid) invalid/NA/empty allele entries before NetMHCpan run")
+        df = df[valid_mask, :]
+    end
     # Build allele list for netMHCpan (remove '*' as expected by downstream)
-    allele_list = [replace(String(a), "*" => "") for a in collect(skipmissing(df[!, allele_col])) if !isempty(strip(String(a)))]
+    allele_list = [replace(String(a), "*" => "") for a in collect(df[!, allele_col])]
     alleles = join(allele_list, ",")
     netmhcpan_exec = netMHCpan_path
 
@@ -252,12 +301,26 @@ function main()
             percent_done = Int(floor(100 * (processed_before_chunk + processed_in_current) / total_work))
             status("Running chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete."; overwrite=true)
             try
-                run(pipeline(cmd, stdout=devnull, stderr=devnull))
+                # Capture stdout/stderr to log files for debugging
+                allele_log = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt")
+                open(allele_log, "w") do log_io
+                    run(pipeline(cmd, stdout=log_io, stderr=log_io))
+                end
                 if !isfile(temp_out_file)
-                    error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
+                    # Read log to provide helpful diagnostics
+                    log_content = try
+                        read(allele_log, String)
+                    catch
+                        "<no log captured>"
+                    end
+                    println("\nERROR: NetMHCpan did not create the expected output file for chunk $(chunk_idx), allele $(allele).")
+                    println("Command: ", join(cmd.exec, " "))
+                    println("Log (stdout/stderr):\n", log_content)
+                    exit(1)
                 end
             catch e
-                println("Error running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
+                println("\nError running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
+                println("Command attempted: ", join(cmd.exec, " "))
                 exit(1)
             end
             # Parse NetMHCpan output and update cache (wide format)
@@ -280,6 +343,24 @@ function main()
                 end
             end
         end
+    end
+    # If merged file is empty (no outputs), write a minimal stub matching Perl expectations
+    try
+        sz = filesize(xlsfile_path)
+        if sz == 0
+            open(xlsfile_path, "w") do out_io
+                # Allele line: tab-separated allele names (without '*')
+                println(out_io, join(allele_list, "\t"))
+                # Header line: Pos, Peptide, ID, then 4 columns per allele: core, icore, EL-score, EL_Rank
+                header = String["Pos", "Peptide", "ID"]
+                for _ in allele_list
+                    append!(header, ["core", "icore", "EL-score", "EL_Rank"])
+                end
+                println(out_io, join(header, "\t"))
+            end
+        end
+    catch
+        # If filesize check fails, proceed without stub
     end
     status("Merged output written to $xlsfile_path")
     # Cleanup temp files
