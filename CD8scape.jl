@@ -145,6 +145,8 @@ elseif command == "run"
     end
 
     folder_path = ARGS[2]
+    extra_args = ARGS[3:end]
+    verbose = any(a -> a == "--verbose", extra_args)
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
     skip_marker = joinpath(folder_path, ".cd8scape_skipped")
@@ -177,7 +179,11 @@ elseif command == "run"
     end
 
     # Run NetMHCpan
-    if !safe_run(`julia --project=. src/run_netMHCpan.jl --folder $folder_path`)
+    local run_cmd = `julia --project=. src/run_netMHCpan.jl --folder $folder_path`
+    if verbose
+        run_cmd = `$run_cmd --verbose`
+    end
+    if !safe_run(run_cmd)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
     end
@@ -243,6 +249,8 @@ elseif command == "run_supertype"
     end
 
     folder_path = ARGS[2]
+    extra_args = ARGS[3:end]
+    verbose = any(a -> a == "--verbose", extra_args)
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
     # Define skip marker path for graceful early exit
@@ -276,7 +284,11 @@ elseif command == "run_supertype"
     end
 
     # Run NetMHCpan
-    if !safe_run(`julia --project=. src/run_netMHCpan_global.jl --folder $folder_path`)
+    local run_cmd = `julia --project=. src/run_netMHCpan_global.jl --folder $folder_path`
+    if verbose
+        run_cmd = `$run_cmd --verbose`
+    end
+    if !safe_run(run_cmd)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
     end
