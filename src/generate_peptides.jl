@@ -2,7 +2,7 @@
 """
 generate_peptides.jl
 
-Generates consensus and variant peptides for each locus from frames and variants data.
+Generates ancestral and derived peptides for each locus from frames and variants data.
 
 Usage:
     julia generate_peptides.jl <folder_path>
@@ -125,8 +125,8 @@ end
 """
     check_locus(df::DataFrame) :: DataFrame
 
-Calculates the relative locus and extracts the pulled base from the consensus sequence.
-Removed filtering on consensus match so that all rows are retained here.
+Calculates the relative locus and extracts the pulled base from the ancestral (consensus) sequence.
+Removed filtering on ancestral match so that all rows are retained here.
 
 # Arguments
 - df::DataFrame: The input DataFrame after join_data.
@@ -148,18 +148,18 @@ function check_locus(df::DataFrame)::DataFrame
 end
 
 """
-    edit_consensus_sequence(df::DataFrame) :: DataFrame
+    edit_ancestral_sequence(df::DataFrame) :: DataFrame
 
-Edits the consensus sequence at the relative locus to produce a variant sequence.
+Edits the ancestral (consensus) sequence at the relative locus to produce a derived sequence.
 
 # Arguments
 - df::DataFrame: Input DataFrame after check_locus.
 
 # Returns
-- A DataFrame with a new 'Variant_sequence' column.
+- A DataFrame with a new 'Derived_sequence' column.
 """
-function edit_consensus_sequence(df::DataFrame)::DataFrame
-    df[!, :Variant_sequence] = similar(df.Consensus_sequence)
+function edit_ancestral_sequence(df::DataFrame)::DataFrame
+    df[!, :Derived_sequence] = similar(df.Consensus_sequence)
     for row in eachrow(df)
         rl = row.Relative_Locus
         consensus = row.Consensus_sequence
@@ -167,10 +167,10 @@ function edit_consensus_sequence(df::DataFrame)::DataFrame
 
         if !ismissing(rl) && 1 ≤ rl ≤ length(consensus)
             seq = collect(consensus)
-            seq[rl] = variant_nt[1]  # <-- fix is here
-            row.Variant_sequence = join(seq)
+            seq[rl] = variant_nt[1]
+            row.Derived_sequence = join(seq)
         else
-            row.Variant_sequence = consensus
+            row.Derived_sequence = consensus
         end
     end
     return df
@@ -179,21 +179,21 @@ end
 """
     translate_sequences(df::DataFrame) :: DataFrame
 
-Translates both the consensus and variant DNA sequences into amino acid sequences.
+Translates both the ancestral and derived DNA sequences into amino acid sequences.
 
 # Arguments
 - df::DataFrame: Input DataFrame after edit_consensus_sequence.
 
 # Returns
-- A DataFrame with 'Consensus_AA_sequence' and 'Variant_AA_sequence' columns added.
+- A DataFrame with 'Ancestral_AA_sequence' and 'Derived_AA_sequence' columns added.
 """
 function translate_sequences(df::DataFrame)::DataFrame
     translate_dna_to_protein(dna_sequence::String)::String = 
         join([get(CODON_DICT, uppercase(dna_sequence[i:i+2]), "?") 
               for i in 1:3:length(dna_sequence)-2], "")
     
-    df[!, :Consensus_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Consensus_sequence]
-    df[!, :Variant_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Variant_sequence]
+    df[!, :Ancestral_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Consensus_sequence]
+    df[!, :Derived_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Derived_sequence]
     return df
 end
 
@@ -204,18 +204,18 @@ end
                           variant_col::Symbol, 
                           substr_lengths::Vector{Int}) :: DataFrame
 
-Generates peptides from both consensus and variant amino acid sequences and flattens
+Generates peptides from both ancestral and derived amino acid sequences and flattens
 the data into a new DataFrame with corresponding annotations.
 
 # Arguments
 - df::DataFrame: Input DataFrame after translate_sequences.
 - relative_locus_col::Symbol: Column symbol for Relative_Locus.
-- consensus_col::Symbol: Column symbol for Consensus amino acid sequences.
-- variant_col::Symbol: Column symbol for Variant amino acid sequences.
+- consensus_col::Symbol: Column symbol for Ancestral amino acid sequences.
+- variant_col::Symbol: Column symbol for Derived amino acid sequences.
 - substr_lengths::Vector{Int}: Peptide lengths to generate.
 
 # Returns
-- A flattened DataFrame with columns for consensus peptides, variant peptides, and labels.
+- A flattened DataFrame with columns for ancestral peptides, derived peptides, and labels.
 """
 function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol, lens::Vector{Int})::DataFrame
     # Fix: AA_Locus should be 1-based, so use ceil instead of floor
@@ -225,8 +225,8 @@ function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol
         Locus = Int[],
         Relative_Locus = Int[],
         AA_Locus = Int[],
-        Consensus_Peptide = String[],
-        Variant_Peptide = String[],
+        Ancestral_Peptide = String[],
+        Derived_Peptide = String[],
         Peptide_label = String[]
     )
 
@@ -235,8 +235,8 @@ function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol
         vps = generate_peptides(row[vs], row.AA_Locus, lens)
 
         if length(cps) == length(vps)
-            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Consensus_AA_sequence)) ? row.Consensus_AA_sequence[row.AA_Locus] : "?"
-            variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Variant_AA_sequence)) ? row.Variant_AA_sequence[row.AA_Locus] : "?"
+            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Ancestral_AA_sequence)) ? row.Ancestral_AA_sequence[row.AA_Locus] : "?"
+            variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Derived_AA_sequence)) ? row.Derived_AA_sequence[row.AA_Locus] : "?"
 
             change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
             base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
@@ -256,32 +256,32 @@ end
 """
     separate_peptides(df::DataFrame) :: DataFrame
 
-Splits the flattened DataFrame into two rows per original row: one for the consensus
-peptide and one for the variant peptide.
+Splits the flattened DataFrame into two rows per original row: one for the ancestral
+peptide and one for the derived peptide.
 
-Only non-synonymous variants (where consensus and variant peptides differ) are retained.
+Only non-synonymous variants (where ancestral and derived peptides differ) are retained.
 
 # Arguments
 - df::DataFrame: Input DataFrame after add_peptides_columns!.
 
 # Returns
-- A DataFrame with separate rows for consensus and variant peptides.
+- A DataFrame with separate rows for ancestral and derived peptides.
 """
 function separate_peptides(df::DataFrame)::DataFrame
     # Retain only rows where the consensus peptide and variant peptide differ.
     initial_rows = nrow(df)
     
     # Identify loci dropped for synonymity and stop codons separately
-    dropped_syn_df = filter(row -> row.Consensus_Peptide == row.Variant_Peptide, df)
-    dropped_stop_df = filter(row -> occursin('*', row.Consensus_Peptide) || occursin('*', row.Variant_Peptide), df)
+    dropped_syn_df = filter(row -> row.Ancestral_Peptide == row.Derived_Peptide, df)
+    dropped_stop_df = filter(row -> occursin('*', row.Ancestral_Peptide) || occursin('*', row.Derived_Peptide), df)
     removed_syn_loci = length(unique(dropped_syn_df.Locus))
     removed_stop_loci = length(unique(dropped_stop_df.Locus))
     removed_syn_rows = nrow(dropped_syn_df)
     removed_stop_rows = nrow(dropped_stop_df)
 
-    filtered_df = filter(row -> row.Consensus_Peptide != row.Variant_Peptide &&
-                                !occursin('*', row.Consensus_Peptide) &&
-                                !occursin('*', row.Variant_Peptide), df)
+    filtered_df = filter(row -> row.Ancestral_Peptide != row.Derived_Peptide &&
+                                !occursin('*', row.Ancestral_Peptide) &&
+                                !occursin('*', row.Derived_Peptide), df)
 
     println("Removed $removed_syn_rows peptides from $removed_syn_loci loci due to synonymity.")
     println("Removed $removed_stop_rows peptides from $removed_stop_loci loci due to stop codons.")
@@ -293,18 +293,18 @@ function separate_peptides(df::DataFrame)::DataFrame
     )
 
     for row in eachrow(filtered_df)
-        # Add consensus peptide row
+        # Add ancestral peptide row
         push!(transformed_df, (
             row.Locus,
-            row.Consensus_Peptide,
-            "$(row.Peptide_label)_C"
+            row.Ancestral_Peptide,
+            "$(row.Peptide_label)_A"
         ))
 
-        # Add variant peptide row
+        # Add derived peptide row
         push!(transformed_df, (
             row.Locus,
-            row.Variant_Peptide,
-            "$(row.Peptide_label)_V"
+            row.Derived_Peptide,
+            "$(row.Peptide_label)_D"
         ))
     end
 
@@ -361,7 +361,7 @@ function main()
     # Run the processing pipeline
     joined = join_data(data_folder)
     checked = check_locus(joined)
-    edited = edit_consensus_sequence(checked)
+    edited = edit_ancestral_sequence(checked)
     translated = translate_sequences(edited)
 
     # Define locus-based peptide lengths to generate
@@ -370,8 +370,8 @@ function main()
     flattened_peptides_df = add_peptides_columns!(
         translated, 
         :Relative_Locus, 
-        :Consensus_AA_sequence, 
-        :Variant_AA_sequence, 
+        :Ancestral_AA_sequence, 
+        :Derived_AA_sequence, 
         substr_lengths
     )
 
