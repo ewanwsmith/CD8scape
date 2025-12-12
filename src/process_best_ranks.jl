@@ -97,8 +97,11 @@ end
     best_ranks.Description = replace.(best_ranks.Description, r"_+$" => "")
 
 # Compute one Description per Locus: prefer current cleaned, otherwise first seen
-    description_roots = combine(groupby(best_ranks, :Locus)) do sdf
-        (; Locus = sdf.Locus[1], Description = sdf.Description[1])
+    description_roots = DataFrame(Locus=Int[], Description=String[])
+    if !isempty(best_ranks)
+        description_roots = combine(groupby(best_ranks, :Locus)) do sdf
+            (; Locus = sdf.Locus[1], Description = sdf.Description[1])
+        end
     end
 
 # Save best_ranks.csv
