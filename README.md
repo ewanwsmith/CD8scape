@@ -130,9 +130,10 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
-./CD8scape.jl run <folder_path>
+./CD8scape.jl run <folder_path> [--verbose]
 ```
-- Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
+- Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes. 
+- `--verbose` flag maintains temporary files for inspection.
 
 ### 5. Run Pipeline (Supertype Panel)
 ```bash
