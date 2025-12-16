@@ -130,16 +130,18 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
-./CD8scape.jl run <folder_path> [--verbose]
+./CD8scape.jl run <folder_path> [--t <N>|--thread <N>] [--verbose]
 ```
-- Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes. 
-- `--verbose` flag maintains temporary files for inspection.
+- Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
+- `--t <N|max>`/`--thread <N|max>` runs up to N peptide chunks in parallel (default 1). Use `max` to request the capped maximum. For safety, concurrency is capped by default to half of logical CPUs; if you request above the cap, it will be reduced with a notice. You can adjust the cap with `CD8SCAPE_MAX_THREADS`.
+- `--verbose` preserves per-allele logs and temp files for inspection.
 
 ### 5. Run Pipeline (Supertype Panel)
 ```bash
-./CD8scape.jl run_supertype <folder_path>
+./CD8scape.jl run_supertype <folder_path> [--t <N>|--thread <N>] [--verbose]
 ```
 - As above, but uses a representative supertype HLA panel.
+- `--t <N|max>`/`--thread <N|max>` runs up to N peptide chunks in parallel (default 1). Use `max` to request the capped maximum. For safety, concurrency is capped by default to half of logical CPUs; if you request above the cap, it will be reduced with a notice. You can adjust the cap with `CD8SCAPE_MAX_THREADS`.
 
  
 

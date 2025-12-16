@@ -34,6 +34,8 @@ function parse_arguments()
             args["folder"] = ARGS[i + 1]
         elseif arg == "--verbose"
             args["verbose"] = true
+        elseif arg == "--t" || arg == "--thread"
+            args["threads_raw"] = ARGS[i + 1]
         end
     end
     if !haskey(args, "folder")
@@ -100,6 +102,38 @@ function main()
     args = parse_arguments()
     folder_path = args["folder"]
     verbose = get(args, "verbose", false)
+    requested = get(args, "threads_raw", nothing)
+    # Safety cap: default to half of logical CPUs unless overridden by ENV
+    cpu_threads = try
+        Sys.CPU_THREADS
+    catch
+        1
+    end
+    default_cap = max(1, Int(floor(cpu_threads / 2)))
+    env_cap = try
+        haskey(ENV, "CD8SCAPE_MAX_THREADS") ? max(1, parse(Int, ENV["CD8SCAPE_MAX_THREADS"])) : nothing
+    catch
+        nothing
+    end
+    cap = env_cap === nothing ? default_cap : env_cap
+    threads = 1
+    if requested !== nothing
+        v = lowercase(String(requested))
+        if v == "max" || v == "cap"
+            threads = cap
+        else
+            try
+                threads = max(1, parse(Int, String(requested)))
+            catch
+                println("Invalid value for --t/--thread: '$(requested)'. Falling back to 1.")
+                threads = 1
+            end
+            if threads > cap
+                println("Capping parallel chunks to $(cap) (requested $(threads); logical CPUs=$(cpu_threads)). Set ENV CD8SCAPE_MAX_THREADS to adjust.")
+                threads = cap
+            end
+        end
+    end
 
     netMHCpan_path = get_netMHCpan_path()
     println("Using NetMHCpan from: ", netMHCpan_path)
@@ -280,18 +314,14 @@ function main()
     # Precompute chunk sizes and cumulative counts for accurate progress
     chunk_lengths = map(length, peptide_chunks)
     cumulative_lengths = cumsum([0; chunk_lengths[1:end-1]])
-    for (chunk_idx, chunk) in enumerate(peptide_chunks)
-        chunk_peps = chunk
-        if isempty(chunk_peps)
-            continue
-        end
+    # Helper to run a single chunk (all alleles) and return its temp outputs
+    function run_chunk(chunk_idx::Int, chunk_peps::Vector{<:AbstractString})
         temp_pep_file = joinpath(folder_path, "_temp_peptides_$(chunk_idx).pep")
         open(temp_pep_file, "w") do io
             for pep in chunk_peps
                 println(io, pep)
             end
         end
-        # For each allele, run NetMHCpan and update progress
         temp_out_files_chunk = String[]
         for (allele_idx, allele) in enumerate(allele_list)
             temp_out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(allele_idx).tsv")
@@ -304,7 +334,6 @@ function main()
             percent_done = Int(floor(100 * (processed_before_chunk + processed_in_current) / total_work))
             status("Running chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete."; overwrite=true)
             try
-                # Capture stdout/stderr: if verbose, keep logs; otherwise discard
                 if verbose
                     allele_log = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt")
                     open(allele_log, "w") do log_io
@@ -314,26 +343,126 @@ function main()
                     run(pipeline(cmd, stdout=devnull, stderr=devnull))
                 end
                 if !isfile(temp_out_file)
-                    # Read log to provide helpful diagnostics
-                    log_content = verbose ? (try
-                        read(joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt"), String)
-                    catch
-                        "<no log captured>"
-                    end) : "<no log captured>"
-                    println("\nERROR: NetMHCpan did not create the expected output file for chunk $(chunk_idx), allele $(allele).")
-                    println("Command: ", join(cmd.exec, " "))
-                    println("Log (stdout/stderr):\n", log_content)
-                    exit(1)
+                    error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
                 end
             catch e
                 println("\nError running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
                 println("Command attempted: ", join(cmd.exec, " "))
                 exit(1)
             end
-            # Parse NetMHCpan output and update cache (wide format)
-            # (Parsing handled below when merging outputs)
         end
-        append!(temp_out_files, temp_out_files_chunk)
+        return temp_out_files_chunk
+    end
+    # Run chunks with bounded concurrency based on --t/--thread
+    sem = Base.Semaphore(threads)
+    results = Vector{Vector{String}}(undef, total_chunks)
+    tasks = Task[]
+
+    # Shared progress state for parallel reporting
+    total_work = total_alleles * total_peptides
+    progress_lock = ReentrantLock()
+    active_chunks = Set{Int}()
+    processed_ref = Ref(0)
+    reporter_task = nothing
+    if threads > 1 && total_work > 0
+        reporter_task = @async begin
+            last_len = 0
+            while true
+                sleep(0.5)
+                running = Int[]
+                pct = 100
+                done = false
+                lock(progress_lock) do
+                    running = sort(collect(active_chunks))
+                    pct = total_work == 0 ? 100 : Int(floor(100 * processed_ref[] / total_work))
+                    done = (processed_ref[] >= total_work) || (isempty(running) && processed_ref[] > 0)
+                end
+                line = "Running chunks: " * (isempty(running) ? "-" : join(running, ", ")) * " of $(total_chunks) total. $(pct)% complete"
+                print("\r", line)
+                if length(line) < last_len
+                    print(" "^(last_len - length(line)))
+                end
+                flush(stdout)
+                last_len = length(line)
+                if done
+                    break
+                end
+            end
+            println()
+        end
+    end
+
+    for (chunk_idx, chunk) in enumerate(peptide_chunks)
+        chunk_peps = chunk
+        if isempty(chunk_peps)
+            results[chunk_idx] = String[]
+            continue
+        end
+        t = @async begin
+            Base.acquire(sem)
+            try
+                if threads == 1
+                    # Original per-chunk progress output
+                    results[chunk_idx] = run_chunk(chunk_idx, chunk_peps)
+                else
+                    # Parallel mode: suppress per-chunk printing and update global progress
+                    lock(progress_lock) do
+                        push!(active_chunks, chunk_idx)
+                    end
+                    temp_pep_file = joinpath(folder_path, "_temp_peptides_$(chunk_idx).pep")
+                    open(temp_pep_file, "w") do io
+                        for pep in chunk_peps
+                            println(io, pep)
+                        end
+                    end
+                    temp_out_files_chunk = String[]
+                    for (allele_idx, allele) in enumerate(allele_list)
+                        temp_out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(allele_idx).tsv")
+                        push!(temp_out_files_chunk, temp_out_file)
+                        cmd = Cmd([netmhcpan_exec, "-p", temp_pep_file, "-xls", "-a", allele, "-xlsfile", temp_out_file])
+                        try
+                            if verbose
+                                allele_log = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt")
+                                open(allele_log, "w") do log_io
+                                    run(pipeline(cmd, stdout=log_io, stderr=log_io))
+                                end
+                            else
+                                run(pipeline(cmd, stdout=devnull, stderr=devnull))
+                            end
+                            if !isfile(temp_out_file)
+                                error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
+                            end
+                        catch e
+                            println("\nError running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
+                            println("Command attempted: ", join(cmd.exec, " "))
+                            exit(1)
+                        end
+                        lock(progress_lock) do
+                            processed_ref[] += length(chunk_peps)
+                        end
+                    end
+                    results[chunk_idx] = temp_out_files_chunk
+                end
+            finally
+                if threads > 1 && total_work > 0
+                    lock(progress_lock) do
+                        delete!(active_chunks, chunk_idx)
+                    end
+                end
+                Base.release(sem)
+            end
+        end
+        push!(tasks, t)
+    end
+
+    for t in tasks
+        wait(t)
+    end
+    if reporter_task !== nothing
+        wait(reporter_task)
+    end
+    for r in results
+        append!(temp_out_files, r)
     end
     # Merge all temp output files into final netmhcpan_output.tsv
     # Ensure the progress line ends with a newline before merging message

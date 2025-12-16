@@ -18,8 +18,8 @@ USAGE:
     ./CD8scape.jl prep
     ./CD8scape.jl read <folder_path>
     ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
-    ./CD8scape.jl run  <folder_path>
-    ./CD8scape.jl run_supertype  <folder_path>
+    ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
+    ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
   
 
 COMMANDS:
@@ -33,6 +33,10 @@ COMMANDS:
 OPTIONS:
   --help, -h
       Print this help message and exit.
+  --t <N|max>, --thread <N|max>
+      Max number of chunks to execute in parallel when running NetMHCpan (default 1). Use 'max' to use the safety cap.
+  --verbose
+      Preserve per-allele logs and temp files for debugging.
 """)
 end
 
@@ -147,6 +151,16 @@ elseif command == "run"
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
     verbose = any(a -> a == "--verbose", extra_args)
+    # Extract optional thread count and pass through
+    threads_arg = String[]
+    for (i, a) in enumerate(extra_args)
+        if a == "--t" || a == "--thread"
+            if i <= length(extra_args) - 1
+                push!(threads_arg, a)
+                push!(threads_arg, extra_args[i+1])
+            end
+        end
+    end
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
     skip_marker = joinpath(folder_path, ".cd8scape_skipped")
@@ -180,6 +194,9 @@ elseif command == "run"
 
     # Run NetMHCpan
     local run_cmd = `julia --project=. src/run_netMHCpan.jl --folder $folder_path`
+    for t in threads_arg
+        run_cmd = `$run_cmd $t`
+    end
     if verbose
         run_cmd = `$run_cmd --verbose`
     end
@@ -251,6 +268,16 @@ elseif command == "run_supertype"
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
     verbose = any(a -> a == "--verbose", extra_args)
+    # Extract optional thread count and pass through
+    threads_arg = String[]
+    for (i, a) in enumerate(extra_args)
+        if a == "--t" || a == "--thread"
+            if i <= length(extra_args) - 1
+                push!(threads_arg, a)
+                push!(threads_arg, extra_args[i+1])
+            end
+        end
+    end
     netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
     processed_output = joinpath(folder_path, "processed_output.csv")
     # Define skip marker path for graceful early exit
@@ -285,6 +312,9 @@ elseif command == "run_supertype"
 
     # Run NetMHCpan
     local run_cmd = `julia --project=. src/run_netMHCpan_global.jl --folder $folder_path`
+    for t in threads_arg
+        run_cmd = `$run_cmd $t`
+    end
     if verbose
         run_cmd = `$run_cmd --verbose`
     end
