@@ -87,11 +87,66 @@ end
     best_ranks = vcat(best_C, best_V)
 
 # --- Map Locus to protein Description from frames.csv ---
+    # Context:
+    # Previously, `Frame` was parsed from `Peptide_label` by taking the
+    # last underscore-delimited token, which truncated protein names.
+    # We now replace `Frame` using frames.csv by matching each row's
+    # `Locus` to the Region ranges and taking the corresponding full
+    # `Description`. If no match is found, we keep the original value.
     frames_file = joinpath(folder_path, "frames.csv")
     if isfile(frames_file)
         frames_df = CSV.read(frames_file, DataFrame)
-        function region_to_start(region)
-            split(strip(string(region)), ";")[1] |> x -> split(x, ",")[1] |> y -> parse(Int, y)
+
+        # Parse a Region string like "77,496" or multiple coords "77,496;606,980"
+        # into a vector of (start, end) tuples
+        function region_to_segments(region_str::AbstractString)::Vector{Tuple{Int,Int}}
+            rs = strip(String(region_str))
+            isempty(rs) && return Tuple{Int,Int}[]
+            segments = Tuple{Int,Int}[]
+            for part in split(rs, ';')
+                se = split(part, ',')
+                if length(se) == 2
+                    start_pos = try
+                        parse(Int, se[1])
+                    catch
+                        continue
+                    end
+                    end_pos = try
+                        parse(Int, se[2])
+                    catch
+                        continue
+                    end
+                    push!(segments, (start_pos, end_pos))
+                end
+            end
+            return segments
+        end
+
+        # Build a lookup table of regions → description
+        regions_lookup = [(region_to_segments(fr.Region), String(fr.Description)) for fr in eachrow(frames_df)]
+
+        # Replace Frame (derived from Peptide_label) with full Description matched by Locus.
+        # If multiple frames overlap a locus, the first match in frames.csv is used.
+        if !isempty(best_ranks)
+            best_ranks[!, :Frame] = [
+                begin
+                    loc = r.Locus
+                    # find first frames.csv entry whose any segment contains locus
+                    desc = nothing
+                    for (segments, d) in regions_lookup
+                        for (s,e) in segments
+                            if loc >= s && loc <= e
+                                desc = d
+                                break
+                            end
+                        end
+                        if desc !== nothing
+                            break
+                        end
+                    end
+                    desc === nothing ? String(r.Frame) : desc
+                end for r in eachrow(best_ranks)
+            ]
         end
     else
         println("Warning: frames.csv not found in $folder_path. Protein labels will not be mapped.")
@@ -100,9 +155,7 @@ end
 # Reorder: put Frame, Locus, Mutation first
     best_ranks = select(best_ranks, :Frame, :Locus, :Mutation, Not([:Frame, :Locus, :Mutation]))
 
-    # Frame already derived from label; no further cleanup needed
-
-# Compute one Frame per (Locus, Mutation): prefer current cleaned, otherwise first seen
+# Compute one Frame per (Locus, Mutation): prefer current mapped, otherwise first seen
     description_roots = DataFrame(Locus=Int[], Mutation=String[], Frame=String[])
     if !isempty(best_ranks)
         description_roots = combine(groupby(best_ranks, [:Locus, :Mutation])) do sdf
