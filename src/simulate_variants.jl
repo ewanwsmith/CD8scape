@@ -12,7 +12,7 @@ Output variants.csv columns:
 - Variant: variant nucleotide (A/C/G/T, excluding the consensus)
 
 Usage:
-    julia simulate_variants.jl <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
+    julia simulate_variants.jl <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest]
 
 Sampling options (standalone, no --sample needed):
 - --n: sample an absolute count of variants (e.g., --n 500)
@@ -26,6 +26,7 @@ Requires:
 using CSV
 using DataFrames
 using Random
+include("path_utils.jl")
 
 # Global codon dictionary for translation
 const CODON_DICT = Dict(
@@ -63,45 +64,13 @@ end
 
 function main()
     if length(ARGS) < 1
-        println("Usage: julia simulate_variants.jl <folder_path>")
+        println("Usage: julia simulate_variants.jl <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest]")
         exit(1)
     end
     folder = ARGS[1]
-    frames_path = joinpath(folder, "frames.csv")
-    if !isfile(frames_path)
-        println("Error: frames.csv not found in $folder")
-        exit(1)
-    end
-
-    frames = CSV.read(frames_path, DataFrame)
-    # Prepare variants rows
-    out = DataFrame(Locus=Int[], Consensus=String[], Variant=String[])
-
-    nucleotides = ['A', 'C', 'G', 'T']
-
-    for row in eachrow(frames)
-        region = replace(row.Region, '"' => "")
-        region_bounds = split(region, ";")
-        start_nt = parse(Int, split(region_bounds[1], ",")[1])
-        end_nt = parse(Int, split(region_bounds[end], ",")[2])
-        dna = String(row.Consensus_sequence)
-        # For each codon, mutate each position (0,1,2) to capture all possible AA changes via single-nucleotide variants
-        n_codons = div(length(dna), 3)
-        for codon_idx in 1:n_codons
-            dna_start = (codon_idx - 1) * 3 + 1
-            for pos in 0:2
-                offset = dna_start + pos
-                locus = start_nt + offset - 1
-                consensus_nt = dna[offset]
-                for var_nt in nucleotides
-                    if var_nt == consensus_nt
-                        continue
-                    end
-                    push!(out, (locus, string(consensus_nt), string(var_nt)))
-                end
-            end
-        end
-    end
+    # Defaults for simulation (suffix token without leading underscore)
+    suffix = "simulated"
+    latest = true
 
     # Parse additional arguments
     # New behavior: --n and --p are sufficient; no --sample mode required
@@ -139,12 +108,58 @@ function main()
         elseif arg == "--seed"
             i += 1
             seed = parse(Int, ARGS[i])
+        elseif arg == "--suffix"
+            # Optional: override default output suffix token (no leading underscore)
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                i += 1
+                suffix = ARGS[i]
+                if startswith(suffix, "_")
+                    suffix = suffix[2:end]
+                end
+            else
+                suffix = "simulated"
+            end
+        elseif arg == "--latest"
+            latest = true
         end
         i += 1
     end
     Random.seed!(seed)
+    # Resolve frames.csv for reading (ignore suffix for input; allow latest fallback)
+    frames_path = resolve_read(joinpath(folder, "frames.csv"); suffix="", latest=latest)
+    if !isfile(frames_path)
+        println("Error: frames.csv not found in $folder")
+        exit(1)
+    end
 
-    variants_path = joinpath(folder, "variants.csv")
+    # Read frames and build full variant enumeration
+    frames = CSV.read(frames_path, DataFrame)
+    out = DataFrame(Locus=Int[], Consensus=String[], Variant=String[])
+    nucleotides = ['A', 'C', 'G', 'T']
+    for row in eachrow(frames)
+        region = replace(row.Region, '"' => "")
+        region_bounds = split(region, ";")
+        start_nt = parse(Int, split(region_bounds[1], ",")[1])
+        end_nt = parse(Int, split(region_bounds[end], ",")[2])
+        dna = String(row.Consensus_sequence)
+        n_codons = div(length(dna), 3)
+        for codon_idx in 1:n_codons
+            dna_start = (codon_idx - 1) * 3 + 1
+            for pos in 0:2
+                offset = dna_start + pos
+                locus = start_nt + offset - 1
+                consensus_nt = dna[offset]
+                for var_nt in nucleotides
+                    if var_nt == consensus_nt
+                        continue
+                    end
+                    push!(out, (locus, string(consensus_nt), string(var_nt)))
+                end
+            end
+        end
+    end
+
+    variants_path = resolve_write(joinpath(folder, "variants.csv"); suffix=suffix)
     println("Simulated variant rows: ", nrow(out))
     # Sampling logic: --n and --p are sufficient
     if have_n && have_p
