@@ -20,6 +20,7 @@ USAGE:
     ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
     ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
     ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
+    ./CD8scape.jl percentile <folder_path> [--s <sim_file>] [--o <obs_file>]
   
 
 COMMANDS:
@@ -28,6 +29,7 @@ COMMANDS:
     simulate     Read frames, then generate and optionally sample simulated variants per frame.
     run          Run the peptide-generation and NetMHCpan pipeline on parsed data.
     run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertype HLA panel.
+    percentile  Compute observed HMBR log2 fold-change percentiles relative to simulated distribution.
   
 
 OPTIONS:
@@ -451,6 +453,44 @@ elseif command == "run_supertype"
     println("run_supertype method finished successfully.")
 
   
+
+elseif command == "percentile"
+    if length(ARGS) < 2
+        println("Error: Missing folder_path for percentile command.")
+        exit(1)
+    end
+
+    folder_path = ARGS[2]
+    extra_args = ARGS[3:end]
+    # Wrap parsing in a helper to avoid soft-scope warnings
+    function _parse_s_o(argv::Vector{String})
+        fwd = String[]
+        i = 1
+        while i <= length(argv)
+            a = argv[i]
+            if a == "--s" || a == "--o"
+                push!(fwd, a)
+                if i < length(argv) && !startswith(argv[i+1], "--")
+                    push!(fwd, argv[i+1])
+                    i += 1
+                end
+            end
+            i += 1
+        end
+        return fwd
+    end
+    forward = _parse_s_o(extra_args)
+
+    local pct_cmd = `julia --project=. src/percentile.jl $folder_path`
+    for f in forward
+        pct_cmd = `$pct_cmd $f`
+    end
+    if !safe_run(pct_cmd)
+        println("Error running src/percentile.jl")
+        exit(1)
+    end
+
+    println("Percentile stage finished successfully.")
 
 else
     println("Error: Invalid command '$command'.")
