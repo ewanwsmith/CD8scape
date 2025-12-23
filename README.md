@@ -143,6 +143,39 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 - As above, but uses a representative supertype HLA panel.
 - `--t <N|max>`/`--thread <N|max>` runs up to N peptide chunks in parallel (default 1). Use `max` to request the capped maximum. For safety, concurrency is capped by default to half of logical CPUs; if you request above the cap, it will be reduced with a notice. You can adjust the cap with `CD8SCAPE_MAX_THREADS`.
 
+### Suffixes and Multi‑Run Folders
+- Purpose: Keep outputs from different runs side‑by‑side in the same data folder without clobbering files.
+- Flag: `--suffix <name>` inserts `_name` before file extensions for outputs, and is preferred for inputs when present.
+- Discovery: If the suffixed input is not present, the tool falls back to the most recent matching file when `--latest` is used (default). Disable with `--no-latest`.
+
+Behavior by stage
+- read: Writes `frames_<suffix>.csv` and `variants_<suffix>.csv`.
+- simulate: Defaults to `--suffix simulated` when none provided; writes `frames_simulated.csv` and `variants_simulated.csv`.
+- run: Prefers `frames_<suffix>.csv` and `variants_<suffix>.csv` if they exist; otherwise falls back to latest `frames*.csv` and `variants*.csv`. Outputs are suffixed: `peptides_labels_<suffix>.csv`, `netMHCpan_output_<suffix>.tsv`, `processed_peptides_<suffix>.csv`, etc.
+- run_supertype: Same suffix handling and outputs as `run` but for the supertype panel.
+
+Examples
+```bash
+# Read with a tag
+./CD8scape.jl read /path/to/data --suffix readtag
+
+# Simulate with default suffix 'simulated'
+./CD8scape.jl simulate /path/to/data --n 100
+
+# Simulate with a custom suffix
+./CD8scape.jl simulate /path/to/data --suffix simtag --n 50
+
+# Run using the simulated tag (produces suffixed outputs)
+./CD8scape.jl run /path/to/data --suffix simulated
+
+# Run with a new tag; if frames_<tag>.csv and variants_<tag>.csv don't exist,
+# generate_peptides will fall back to the most recent frames*/variants*.
+./CD8scape.jl run /path/to/data --suffix fallbacktest
+
+# Run supertype with its own tag (same suffix-first, latest-fallback behavior)
+./CD8scape.jl run_supertype /path/to/data --suffix sttag
+```
+
  
 
 ## Workflow Summary
