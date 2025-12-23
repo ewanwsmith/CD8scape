@@ -224,7 +224,7 @@ function main()
     # 4) Write final DataFrame to frames.csv
     output_csv = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
     CSV.write(output_csv, final_df)
-    println("DataFrame written to $output_csv with columns: Region, Consensus_sequence, Description")
+    println("Reading frames saved to: $output_csv")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

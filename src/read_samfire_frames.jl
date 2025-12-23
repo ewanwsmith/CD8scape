@@ -140,7 +140,7 @@ function main()
     display(frames_df)
     out_csv = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
     CSV.write(out_csv, frames_df)
-    println("DataFrame successfully saved to $out_csv")
+    println("Reading frames saved to: $out_csv")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

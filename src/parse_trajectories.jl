@@ -175,7 +175,7 @@ function main()
 
     # Save the DataFrame to variants.csv
     CSV.write(output_file, final_df)
-    println("DataFrame saved to $output_file")
+    println("Variants written to: $output_file")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

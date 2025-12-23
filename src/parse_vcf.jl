@@ -74,7 +74,7 @@ function main()
     # Write out the CSV named 'variants.csv' in the same folder
     output_file_path = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
     CSV.write(output_file_path, expanded)
-    println("DataFrame saved as $output_file_path")
+    println("Variants written to: $output_file_path")
 end
 
 function find_vcf_file(folder_path::String)
