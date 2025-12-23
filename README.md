@@ -143,6 +143,18 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 - As above, but uses a representative supertype HLA panel.
 - `--t <N|max>`/`--thread <N|max>` runs up to N peptide chunks in parallel (default 1). Use `max` to request the capped maximum. For safety, concurrency is capped by default to half of logical CPUs; if you request above the cap, it will be reduced with a notice. You can adjust the cap with `CD8SCAPE_MAX_THREADS`.
 
+### 6. Percentile Scoring
+Compute the percentile of observed variant HMBR log2 fold-change values against a simulated background distribution.
+
+```bash
+./CD8scape.jl percentile <folder_path> [--s <sim_file>] [--o <obs_file>]
+```
+
+- **Simulation input**: defaults to `harmonic_mean_best_ranks_simulated.csv` in `<folder_path>`. Override with `--s` (relative to folder or absolute path).
+- **Observed input**: defaults to the most recent `harmonic_mean_best_ranks*.csv` in `<folder_path>` whose suffix is not `_simulated`. Override with `--o`.
+- **Overlap handling**: simulated entries that exactly match observed variants (by `Frame|Locus|Mutation` → or `Locus|Mutation` → or `Locus`) are removed before scoring.
+- **Output**: writes `percentile_harmonic_mean_best_ranks(_<suffix>).csv` in `<folder_path>`, adding a new `Percentile` column (0–100).
+
 ### Suffixes and Multi‑Run Folders
 - Purpose: Keep outputs from different runs side‑by‑side in the same data folder without clobbering files.
 - Flag: `--suffix <name>` inserts `_name` before file extensions for outputs, and is preferred for inputs when present.
@@ -189,6 +201,7 @@ Examples
 - `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
 - `best_ranks.csv`, `harmonic_mean_best_ranks.csv`: Best ranks and fold change analysis
+- `percentile_harmonic_mean_best_ranks.csv`: Observed fold-change annotated with Percentile vs simulated background
 
 
 ## Removed
