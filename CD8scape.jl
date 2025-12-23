@@ -58,6 +58,31 @@ end
 
 command = ARGS[1]
 
+# Include path helpers for suffix/latest handling
+include("src/path_utils.jl")
+
+# Extract common flags from extra arguments
+function parse_suffix_latest(argv::Vector{String})
+    suffix = ""
+    latest = true
+    i = 1
+    while i <= length(argv)
+        a = argv[i]
+        if a == "--suffix"
+            if i + 1 <= length(argv) && !startswith(argv[i+1], "--")
+                i += 1
+                suffix = argv[i]
+            end
+        elseif a == "--latest"
+            latest = true
+        elseif a == "--no-latest"
+            latest = false
+        end
+        i += 1
+    end
+    return suffix, latest
+end
+
 # Process "prep" command
 if command == "prep"
     # Setup environment
@@ -74,14 +99,23 @@ elseif command == "read"
         exit(1)
     end
     folder_path = ARGS[2]
-    frames_csv_path = joinpath(folder_path, "frames.csv")
-    variants_csv_path = joinpath(folder_path, "variants.csv")
+    extra_args = ARGS[3:end]
+    suffix, latest = parse_suffix_latest(extra_args)
+    # Expected output path for frames (do not require existence before running readers)
+    frames_csv_path = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
+    variants_csv_path = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
 
     # Read frames (NCBI first, then Samfire fallback)
-    ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
+    local read_ncbi_cmd = `julia --project=. src/read_ncbi_frames.jl $folder_path`
+    if suffix != ""; read_ncbi_cmd = `$read_ncbi_cmd --suffix $suffix`; end
+    if latest; read_ncbi_cmd = `$read_ncbi_cmd --latest`; else read_ncbi_cmd = `$read_ncbi_cmd --no-latest`; end
+    ncbi_success = safe_run(read_ncbi_cmd)
     if !ncbi_success || !isfile(frames_csv_path)
         println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
-        samfire_success = safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
+        local read_sam_cmd = `julia --project=. src/read_samfire_frames.jl $folder_path`
+        if suffix != ""; read_sam_cmd = `$read_sam_cmd --suffix $suffix`; end
+        if latest; read_sam_cmd = `$read_sam_cmd --latest`; else read_sam_cmd = `$read_sam_cmd --no-latest`; end
+        samfire_success = safe_run(read_sam_cmd)
         if !samfire_success || !isfile(frames_csv_path)
             println("Error: Both frame-reading methods failed.")
             exit(1)
@@ -92,13 +126,17 @@ elseif command == "read"
     vcf_files = filter(f -> endswith(f, ".vcf") || endswith(f, ".vcf.gz"), readdir(folder_path; join=true))
     parse_ok = false
     if !isempty(vcf_files)
-        parse_ok = safe_run(`julia --project=. src/parse_vcf.jl $folder_path`)
+            local parse_vcf_cmd = `julia --project=. src/parse_vcf.jl $folder_path`
+            if suffix != ""; parse_vcf_cmd = `$parse_vcf_cmd --suffix $suffix`; end
+            parse_ok = safe_run(parse_vcf_cmd)
         if !parse_ok
             println("parse_vcf.jl failed; trying parse_trajectories.jl.")
         end
     end
     if !parse_ok
-        parse_ok = safe_run(`julia --project=. src/parse_trajectories.jl $folder_path`)
+            local parse_traj_cmd = `julia --project=. src/parse_trajectories.jl $folder_path`
+            if suffix != ""; parse_traj_cmd = `$parse_traj_cmd --suffix $suffix`; end
+            parse_ok = safe_run(parse_traj_cmd)
     end
     if !parse_ok || !isfile(variants_csv_path)
         println("Error: Failed to parse variants from VCF or trajectories.")
@@ -115,14 +153,26 @@ elseif command == "simulate"
     end
 
     folder_path = ARGS[2]
-    frames_csv_path = joinpath(folder_path, "frames.csv")
     extra_args = ARGS[3:end]
+    suffix, latest = parse_suffix_latest(extra_args)
+    # If no suffix provided, default to 'simulated' so frames/variants share it
+    if isempty(suffix)
+        suffix = "simulated"
+    end
+    # Expected output path for frames (created by readers)
+    frames_csv_path = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
 
     # Try NCBI frame reading first
-    ncbi_success = safe_run(`julia --project=. src/read_ncbi_frames.jl $folder_path`)
+    local read_ncbi_cmd = `julia --project=. src/read_ncbi_frames.jl $folder_path`
+    if suffix != ""; read_ncbi_cmd = `$read_ncbi_cmd --suffix $suffix`; end
+    if latest; read_ncbi_cmd = `$read_ncbi_cmd --latest`; else read_ncbi_cmd = `$read_ncbi_cmd --no-latest`; end
+    ncbi_success = safe_run(read_ncbi_cmd)
     if !ncbi_success || !isfile(frames_csv_path)
         println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
-        samfire_success = safe_run(`julia --project=. src/read_samfire_frames.jl $folder_path`)
+        local read_sam_cmd = `julia --project=. src/read_samfire_frames.jl $folder_path`
+        if suffix != ""; read_sam_cmd = `$read_sam_cmd --suffix $suffix`; end
+        if latest; read_sam_cmd = `$read_sam_cmd --latest`; else read_sam_cmd = `$read_sam_cmd --no-latest`; end
+        samfire_success = safe_run(read_sam_cmd)
         if !samfire_success || !isfile(frames_csv_path)
             println("Error: Both frame-reading methods failed.")
             exit(1)
@@ -150,6 +200,7 @@ elseif command == "run"
 
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
+    suffix, latest = parse_suffix_latest(extra_args)
     verbose = any(a -> a == "--verbose", extra_args)
     # Extract optional thread count and pass through
     threads_arg = String[]
@@ -161,12 +212,16 @@ elseif command == "run"
             end
         end
     end
-    netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
-    processed_output = joinpath(folder_path, "processed_output.csv")
+    # Expected output for NetMHCpan runner (construct path without requiring existence)
+        netmhcpan_output = resolve_write(joinpath(folder_path, "netmhcpan_output.tsv"); suffix=suffix)
+        processed_output = resolve_write(joinpath(folder_path, "processed_output.csv"); suffix=suffix)
     skip_marker = joinpath(folder_path, ".cd8scape_skipped")
 
     # Generate Peptides
-    if !safe_run(`julia --project=. src/generate_peptides.jl $folder_path`)
+        local gen_cmd = `julia --project=. src/generate_peptides.jl $folder_path`
+        if suffix != ""; gen_cmd = `$gen_cmd --suffix $suffix`; end
+        if latest; gen_cmd = `$gen_cmd --latest`; else gen_cmd = `$gen_cmd --no-latest`; end
+        if !safe_run(gen_cmd)
         println("Error running src/generate_peptides.jl")
         exit(1)
     end
@@ -200,6 +255,8 @@ elseif command == "run"
     if verbose
         run_cmd = `$run_cmd --verbose`
     end
+    if suffix != ""; run_cmd = `$run_cmd --suffix $suffix`; end
+    if latest; run_cmd = `$run_cmd --latest`; else run_cmd = `$run_cmd --no-latest`; end
     if !safe_run(run_cmd)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
@@ -245,13 +302,19 @@ elseif command == "run"
     end
 
     # Process Scores
-    if !safe_run(`julia --project=. src/process_scores.jl --folder $folder_path`)
+    local scores_cmd = `julia --project=. src/process_scores.jl --folder $folder_path`
+    if suffix != ""; scores_cmd = `$scores_cmd --suffix $suffix`; end
+    if latest; scores_cmd = `$scores_cmd --latest`; else scores_cmd = `$scores_cmd --no-latest`; end
+    if !safe_run(scores_cmd)
         println("Error running src/process_scores.jl")
         exit(1)
     end
 
     # Process Best Ranks
-    if !safe_run(`julia --project=. src/process_best_ranks.jl $folder_path`)
+    local ranks_cmd = `julia --project=. src/process_best_ranks.jl $folder_path`
+    if suffix != ""; ranks_cmd = `$ranks_cmd --suffix $suffix`; end
+    if latest; ranks_cmd = `$ranks_cmd --latest`; else ranks_cmd = `$ranks_cmd --no-latest`; end
+    if !safe_run(ranks_cmd)
         println("Error running src/process_best_ranks.jl")
         exit(1)
     end
@@ -267,6 +330,7 @@ elseif command == "run_supertype"
 
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
+    suffix, latest = parse_suffix_latest(extra_args)
     verbose = any(a -> a == "--verbose", extra_args)
     # Extract optional thread count and pass through
     threads_arg = String[]
@@ -278,13 +342,16 @@ elseif command == "run_supertype"
             end
         end
     end
-    netmhcpan_output = joinpath(folder_path, "netmhcpan_output.tsv")
-    processed_output = joinpath(folder_path, "processed_output.csv")
+    netmhcpan_output = resolve_write(joinpath(folder_path, "netmhcpan_output.tsv"); suffix=suffix)
+    processed_output = resolve_write(joinpath(folder_path, "processed_output.csv"); suffix=suffix)
     # Define skip marker path for graceful early exit
     skip_marker = joinpath(folder_path, ".cd8scape_skipped")
 
     # Generate Peptides
-    if !safe_run(`julia --project=. src/generate_peptides.jl $folder_path`)
+    local gen_cmd = `julia --project=. src/generate_peptides.jl $folder_path`
+    if suffix != ""; gen_cmd = `$gen_cmd --suffix $suffix`; end
+    if latest; gen_cmd = `$gen_cmd --latest`; else gen_cmd = `$gen_cmd --no-latest`; end
+    if !safe_run(gen_cmd)
         println("Error running src/generate_peptides.jl")
         exit(1)
     end
@@ -318,6 +385,8 @@ elseif command == "run_supertype"
     if verbose
         run_cmd = `$run_cmd --verbose`
     end
+    if suffix != ""; run_cmd = `$run_cmd --suffix $suffix`; end
+    if latest; run_cmd = `$run_cmd --latest`; else run_cmd = `$run_cmd --no-latest`; end
     if !safe_run(run_cmd)
         println("Error: NetMHCpan did not run successfully.")
         exit(1)
@@ -362,13 +431,19 @@ elseif command == "run_supertype"
     end
 
     # Process Scores
-    if !safe_run(`julia --project=. src/process_scores.jl --folder $folder_path`)
+    local scores_cmd = `julia --project=. src/process_scores.jl --folder $folder_path`
+    if suffix != ""; scores_cmd = `$scores_cmd --suffix $suffix`; end
+    if latest; scores_cmd = `$scores_cmd --latest`; else scores_cmd = `$scores_cmd --no-latest`; end
+    if !safe_run(scores_cmd)
         println("Error running src/process_scores.jl")
         exit(1)
     end
 
     # Process Best Ranks
-    if !safe_run(`julia --project=. src/process_best_ranks.jl $folder_path`)
+    local ranks_cmd = `julia --project=. src/process_best_ranks.jl $folder_path`
+    if suffix != ""; ranks_cmd = `$ranks_cmd --suffix $suffix`; end
+    if latest; ranks_cmd = `$ranks_cmd --latest`; else ranks_cmd = `$ranks_cmd --no-latest`; end
+    if !safe_run(ranks_cmd)
         println("Error running src/process_best_ranks.jl")
         exit(1)
     end
