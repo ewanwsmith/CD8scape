@@ -13,6 +13,7 @@ function status(msg; overwrite=false)
 end
 using Serialization
 using DataFrames
+include("path_utils.jl")
 """
 run_netMHCpan.jl
 
@@ -34,6 +35,14 @@ function parse_arguments()
             args["verbose"] = true
         elseif arg == "--t" || arg == "--thread"
             args["threads_raw"] = ARGS[i + 1]
+        elseif arg == "--suffix"
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                args["suffix"] = ARGS[i + 1]
+            else
+                args["suffix"] = ""
+            end
+        elseif arg == "--latest"
+            args["latest"] = true
         end
     end
     if !haskey(args, "folder")
@@ -93,6 +102,8 @@ function main()
     args = parse_arguments()
     folder_path = args["folder"]
     verbose = get(args, "verbose", false)
+    suffix  = get(args, "suffix", "")
+    latest  = get(args, "latest", true)
     requested = get(args, "threads_raw", nothing)
     # Safety cap: default to half of logical CPUs unless overridden by ENV
     cpu_threads = try
@@ -131,10 +142,11 @@ function main()
     println("Using NetMHCpan executable: ", netMHCpan_exe)
 
     # File paths
-    alleles_file = joinpath(folder_path, "alleles.txt")
-    peptides_file = joinpath(folder_path, "Peptides.pep")
-    xlsfile_path = joinpath(folder_path, "netMHCpan_output.tsv")
-    cache_file = joinpath(folder_path, "results_cache.jls")
+    # Inputs: ignore suffix; discover with latest
+    alleles_file = resolve_read(joinpath(folder_path, "alleles.txt"); suffix="", latest=latest)
+    peptides_file = resolve_read(joinpath(folder_path, "Peptides.pep"); suffix="", latest=latest)
+    xlsfile_path = resolve_write(joinpath(folder_path, "netMHCpan_output.tsv"); suffix=suffix)
+    cache_file   = resolve_write(joinpath(folder_path, "results_cache.jls"); suffix=suffix)
 
     # Check if required files exist
     for file in [alleles_file, peptides_file]

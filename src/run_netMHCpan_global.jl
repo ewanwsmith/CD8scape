@@ -24,6 +24,7 @@ Arguments:
 """
 
 include("env.jl")
+include("path_utils.jl")
 using CSV, DataFrames
 using Serialization
 
@@ -36,6 +37,14 @@ function parse_arguments()
             args["verbose"] = true
         elseif arg == "--t" || arg == "--thread"
             args["threads_raw"] = ARGS[i + 1]
+        elseif arg == "--suffix"
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                args["suffix"] = ARGS[i + 1]
+            else
+                args["suffix"] = ""
+            end
+        elseif arg == "--latest"
+            args["latest"] = true
         end
     end
     if !haskey(args, "folder")
@@ -102,6 +111,8 @@ function main()
     args = parse_arguments()
     folder_path = args["folder"]
     verbose = get(args, "verbose", false)
+    suffix  = get(args, "suffix", "")
+    latest  = get(args, "latest", true)
     requested = get(args, "threads_raw", nothing)
     # Safety cap: default to half of logical CPUs unless overridden by ENV
     cpu_threads = try
@@ -166,10 +177,11 @@ function main()
         error("supertype_panel.csv not found. Looked in: $(local_candidate), $(cwd_candidate), and project src/ upwards from $(abspath(@__DIR__)).")
     end
     representatives_file = find_representatives_file(folder_path)
-    peptides_file = joinpath(folder_path, "Peptides.pep")
+    # Input peptides: ignore suffix; discover with latest
+    peptides_file = resolve_read(joinpath(folder_path, "Peptides.pep"); suffix="", latest=latest)
     # Use lowercase filename to match downstream Perl script expectation
-    xlsfile_path = joinpath(folder_path, "netmhcpan_output.tsv")
-    cache_file = joinpath(folder_path, "results_cache.jls")
+    xlsfile_path = resolve_write(joinpath(folder_path, "netmhcpan_output.tsv"); suffix=suffix)
+    cache_file   = resolve_write(joinpath(folder_path, "results_cache.jls"); suffix=suffix)
 
     # Check if required files exist
     if !isfile(peptides_file)
