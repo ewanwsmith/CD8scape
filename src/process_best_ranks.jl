@@ -5,23 +5,47 @@ process_best_ranks.jl
 Processes best ranks for ancestral and derived peptides for each locus.
 
 Usage:
-    julia process_best_ranks.jl <folder_path>
+    julia process_best_ranks.jl <folder_path> [--suffix <name>] [--latest|--no-latest]
 
 Arguments:
     <folder_path>   Path to the folder containing processed_peptides.csv.
 """
 
 using DataFrames, CSV, Statistics, StatsBase
+include("path_utils.jl")
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    # Parse command-line argument for input folder
-    if length(ARGS) != 1
-        println("Usage: julia process_best_ranks.jl <folder_path>")
+    # Parse positional folder and optional flags
+    if length(ARGS) < 1
+        println("Usage: julia process_best_ranks.jl <folder_path> [--suffix <name>] [--latest]")
         exit(1)
     end
 
     folder_path = ARGS[1]
-    input_file = joinpath(folder_path, "processed_peptides.csv")
+    # Helper to parse flags from the remainder of ARGS to avoid soft-scope warnings
+    function _parse_suffix_latest(argv::Vector{String})
+        sfx = ""
+        lat = true
+        i = 1
+        while i <= length(argv)
+            a = argv[i]
+            if a == "--suffix"
+                if i + 1 <= length(argv) && !startswith(argv[i+1], "--")
+                    i += 1
+                    sfx = argv[i]
+                end
+            elseif a == "--latest"
+                lat = true
+            elseif a == "--no-latest"
+                lat = false
+            end
+            i += 1
+        end
+        return sfx, lat
+    end
+    suffix, latest = _parse_suffix_latest(ARGS[2:end])
+
+    input_file = resolve_read(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix, latest=latest)
     println("Reading input file: $input_file")
 
     # Read the input CSV into a DataFrame with error handling
@@ -93,7 +117,7 @@ end
     # We now replace `Frame` using frames.csv by matching each row's
     # `Locus` to the Region ranges and taking the corresponding full
     # `Description`. If no match is found, we keep the original value.
-    frames_file = joinpath(folder_path, "frames.csv")
+    frames_file = resolve_read(joinpath(folder_path, "frames.csv"); suffix="", latest=latest)
     if isfile(frames_file)
         frames_df = CSV.read(frames_file, DataFrame)
 
@@ -164,7 +188,7 @@ end
     end
 
 # Save best_ranks.csv
-    best_ranks_file = joinpath(folder_path, "best_ranks.csv")
+    best_ranks_file = resolve_write(joinpath(folder_path, "best_ranks.csv"); suffix=suffix)
     CSV.write(best_ranks_file, best_ranks)
     println("Saved best ranks to $best_ranks_file")
 
@@ -239,13 +263,13 @@ end
     pivot_df = select(pivot_df, output_cols...)
 
     # Save harmonic mean results with fold change
-    harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv") 
+    harmonic_mean_file = resolve_write(joinpath(folder_path, "harmonic_mean_best_ranks.csv"); suffix=suffix)
     CSV.write(harmonic_mean_file, pivot_df)
     println("Saved harmonic mean best ranks to $harmonic_mean_file")
 
     # Minimal test: write Locus and log2_foldchange_HMBR to a separate CSV for debugging
     if :log2_foldchange_HMBR in names(pivot_df)
-        minimal_test_file = joinpath(folder_path, "harmonic_mean_best_ranks_log2_test.csv")
+        minimal_test_file = resolve_write(joinpath(folder_path, "harmonic_mean_best_ranks_log2_test.csv"); suffix=suffix)
         minimal_df = select(pivot_df, :Locus, :log2_foldchange_HMBR)
         CSV.write(minimal_test_file, minimal_df)
         println("Minimal test CSV written to $minimal_test_file")

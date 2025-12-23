@@ -5,13 +5,14 @@ process_best_ranks_supertype.jl
 Processes best ranks for peptides using a representative supertype HLA panel.
 
 Usage:
-    julia process_best_ranks_supertype.jl <folder_path>
+    julia process_best_ranks_supertype.jl <folder_path> [--suffix <name>] [--latest|--no-latest]
 
 Arguments:
     <folder_path>   Path to the folder containing processed peptides.
 """
 
 using DataFrames, CSV, Statistics, StatsBase
+include("path_utils.jl")
 
 # -----------------------------
 # Helpers
@@ -97,13 +98,36 @@ end
 # -----------------------------
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    if length(ARGS) != 1
-        println("Usage: julia process_best_ranks_supertype.jl <folder_path>")
+    if length(ARGS) < 1
+        println("Usage: julia process_best_ranks_supertype.jl <folder_path> [--suffix <name>] [--latest|--no-latest]")
         exit(1)
     end
 
     folder_path = ARGS[1]
-    input_file = joinpath(folder_path, "processed_peptides.csv")
+    # Helper to parse flags from the remainder of ARGS to avoid soft-scope warnings
+    function _parse_suffix_latest(argv::Vector{String})
+        sfx = ""
+        lat = true
+        i = 1
+        while i <= length(argv)
+            a = argv[i]
+            if a == "--suffix"
+                if i + 1 <= length(argv) && !startswith(argv[i+1], "--")
+                    i += 1
+                    sfx = argv[i]
+                end
+            elseif a == "--latest"
+                lat = true
+            elseif a == "--no-latest"
+                lat = false
+            end
+            i += 1
+        end
+        return sfx, lat
+    end
+    suffix, latest = _parse_suffix_latest(ARGS[2:end])
+
+    input_file = resolve_read(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix, latest=latest)
     println("Reading input file: $input_file")
 
     # Read the input CSV into a DataFrame with error handling
@@ -182,7 +206,7 @@ end
 # No description mapping needed; Frame already present
 
 # Save best_ranks.csv
-best_ranks_file = joinpath(folder_path, "best_ranks.csv")
+best_ranks_file = resolve_write(joinpath(folder_path, "best_ranks.csv"); suffix=suffix)
 CSV.write(best_ranks_file, best_ranks)
 println("Saved best ranks to $best_ranks_file")
 
@@ -359,7 +383,7 @@ if !isempty(best_ranks)
     pivot_df = select(pivot_df, :Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR)
 
     # Save results
-    harmonic_mean_file = joinpath(folder_path, "harmonic_mean_best_ranks.csv")
+    harmonic_mean_file = resolve_write(joinpath(folder_path, "harmonic_mean_best_ranks.csv"); suffix=suffix)
     CSV.write(harmonic_mean_file, pivot_df)
     println("Saved weighted harmonic mean best ranks with fold change to $harmonic_mean_file")
 else

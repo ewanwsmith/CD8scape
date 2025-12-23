@@ -5,13 +5,14 @@ process_scores.jl
 Joins NetMHCpan output with peptide labels for downstream analysis.
 
 Usage:
-    julia process_scores.jl --folder <folder_path>
+    julia process_scores.jl --folder <folder_path> [--suffix <name>] [--latest]
 
 Arguments:
     --folder   Path to the folder containing NetMHCpan and label files.
 """
 
 using DataFrames, CSV
+include("path_utils.jl")
 
 # Manual argument parsing function
 function parse_arguments()
@@ -19,18 +20,26 @@ function parse_arguments()
     for (i, arg) in enumerate(ARGS)
         if arg in ["--folder", "-f"]
             args["folder"] = ARGS[i + 1]
+        elseif arg == "--suffix"
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                args["suffix"] = ARGS[i + 1]
+            else
+                args["suffix"] = ""
+            end
+        elseif arg == "--latest"
+            args["latest"] = true
         end
     end
     if !haskey(args, "folder")
-        error("Usage: ./process_scores.jl --folder /path/to/data")
+        error("Usage: ./process_scores.jl --folder /path/to/data [--suffix <name>] [--latest]")
     end
     return args
 end
 
 # Process and join files
-function process_and_join(folder_path::String)::DataFrame
-    mhcpan_path = joinpath(folder_path, "processed_output.csv")
-    peptides_path = joinpath(folder_path, "peptides_labels.csv")
+function process_and_join(folder_path::String; suffix::AbstractString="", latest::Bool=false)::DataFrame
+    mhcpan_path    = resolve_read(joinpath(folder_path, "processed_output.csv"); suffix=suffix, latest=latest)
+    peptides_path  = resolve_read(joinpath(folder_path, "peptides_labels.csv"); suffix=suffix, latest=latest)
 
     if !(isfile(mhcpan_path) && isfile(peptides_path))
         error("Required files not found. Ensure both processed_output.csv and peptides_labels.csv are present in $folder_path.")
@@ -74,8 +83,9 @@ end
 function main()
     args = parse_arguments()
     folder_path = args["folder"]
-
-    joined_df = process_and_join(folder_path)
+    suffix  = get(args, "suffix", "")
+    latest  = get(args, "latest", true)
+    joined_df = process_and_join(folder_path; suffix=suffix, latest=latest)
     reshaped_df = reshape_hla_data(joined_df)
 
     # Drop rows where MHC is missing
@@ -84,7 +94,7 @@ function main()
     println("Sorting by Locus...")
     sort!(filtered_df, :Locus)
 
-    output_path = joinpath(folder_path, "processed_peptides.csv")
+    output_path = resolve_write(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix)
     println("Saving results to $output_path...")
     CSV.write(output_path, filtered_df)
 
