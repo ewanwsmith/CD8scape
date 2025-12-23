@@ -15,6 +15,7 @@ using CSV
 using DataFrames
 using CodecZlib
 import Base.Filesystem: splitext, dirname, basename, joinpath, readdir
+include("path_utils.jl")
 
 function main()
     # Ensure the user provided a folder path
@@ -24,6 +25,21 @@ function main()
     end
 
     folder_path = ARGS[1]
+    # Optional suffix for output variants; latest not used here
+    suffix = ""
+    if length(ARGS) >= 2
+        i = 2
+        while i <= length(ARGS)
+            arg = ARGS[i]
+            if arg == "--suffix"
+                if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                    i += 1
+                    suffix = ARGS[i]
+                end
+            end
+            i += 1
+        end
+    end
     vcf_file_path = find_vcf_file(folder_path)
     println("Found VCF file: $vcf_file_path")
 
@@ -56,7 +72,7 @@ function main()
     rename!(expanded, :POS => :Locus, :REF => :Consensus, :ALT => :Variant)
 
     # Write out the CSV named 'variants.csv' in the same folder
-    output_file_path = joinpath(folder_path, "variants.csv")
+    output_file_path = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
     CSV.write(output_file_path, expanded)
     println("DataFrame saved as $output_file_path")
 end

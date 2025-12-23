@@ -14,6 +14,7 @@ Arguments:
 using DataFrames
 using CSV
 using FilePathsBase
+include("path_utils.jl")
 
 """
     parse_trajectories(trajectories_file)
@@ -120,6 +121,26 @@ function main()
     end
 
     folder_path = ARGS[1]
+    # Optional suffix for output variants
+    suffix = ""
+    latest = true
+    if length(ARGS) >= 2
+        i = 2
+        while i <= length(ARGS)
+            arg = ARGS[i]
+            if arg == "--suffix"
+                if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                    i += 1
+                    suffix = ARGS[i]
+                end
+            elseif arg == "--latest"
+                latest = true
+            elseif arg == "--no-latest"
+                latest = false
+            end
+            i += 1
+        end
+    end
 
     # Attempt to find single_locus_trajectories.out
     trajectories_file = joinpath(folder_path, "single_locus_trajectories.out")
@@ -144,7 +165,7 @@ function main()
     end
 
     # Build output file path
-    output_file = joinpath(folder_path, "variants.csv")
+    output_file = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
 
     # Parse the trajectories
     trajectories_df = parse_trajectories(trajectories_file)
