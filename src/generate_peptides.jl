@@ -5,7 +5,7 @@ generate_peptides.jl
 Generates ancestral and derived peptides for each locus from frames and variants data.
 
 Usage:
-    julia generate_peptides.jl <folder_path>
+    julia generate_peptides.jl <folder_path> [--suffix <name>] [--latest|--no-latest]
 
 Arguments:
     <folder_path>   Path to the folder containing frames.csv and variants.csv.
@@ -13,6 +13,7 @@ Arguments:
 
 using DataFrames
 using CSV
+include("path_utils.jl")
 
 # ------------------------------------------------------------------------------
 # Constants
@@ -101,9 +102,16 @@ to keep only rows where the variant locus is within the frame.
 # Returns
 - A DataFrame of joined data.
 """
-function join_data(folder_path::String)::DataFrame
-    frames_path = joinpath(folder_path, "frames.csv")
-    variants_path = joinpath(folder_path, "variants.csv")
+function join_data(folder_path::String; suffix::AbstractString="", latest::Bool=true)::DataFrame
+    # Prefer suffixed inputs if they exist; otherwise, fall back to latest discovery
+    base_frames   = joinpath(folder_path, "frames.csv")
+    base_variants = joinpath(folder_path, "variants.csv")
+
+    candidate_frames = with_suffix(base_frames, suffix)
+    frames_path = isfile(candidate_frames) ? candidate_frames : discover_path(base_frames; latest=latest)
+
+    candidate_variants = with_suffix(base_variants, suffix)
+    variants_path = isfile(candidate_variants) ? candidate_variants : discover_path(base_variants; latest=latest)
     
     frames = CSV.read(frames_path, DataFrame)
     variants = CSV.read(variants_path, DataFrame)
@@ -359,9 +367,27 @@ end
 function main()
     # The first argument should be the data_folder
     data_folder = ARGS[1]
+    # parse optional flags
+    suffix = ""
+    latest = true
+    i = 2
+    while i <= length(ARGS)
+        a = ARGS[i]
+        if a == "--suffix"
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                i += 1
+                suffix = ARGS[i]
+            end
+        elseif a == "--latest"
+            latest = true
+        elseif a == "--no-latest"
+            latest = false
+        end
+        i += 1
+    end
 
     # Run the processing pipeline
-    joined = join_data(data_folder)
+    joined = join_data(data_folder; suffix=suffix, latest=latest)
     checked = check_locus(joined)
     edited = edit_ancestral_sequence(checked)
     translated = translate_sequences(edited)
@@ -383,7 +409,7 @@ function main()
     peptide_df = transformed_df
 
     # Save to CSV
-    csv_file_path = joinpath(data_folder, "peptides_labels.csv")
+    csv_file_path = resolve_write(joinpath(data_folder, "peptides_labels.csv"); suffix=suffix)
     CSV.write(csv_file_path, peptide_df)
     println("peptides_labels.csv file has been written to: $csv_file_path")
 
