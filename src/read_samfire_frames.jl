@@ -5,7 +5,7 @@ read_samfire_frames.jl
 Reads Samfire Reading_Frames.dat for open reading frame extraction.
 
 Usage:
-    julia read_samfire_frames.jl <folder_path>
+    julia read_samfire_frames.jl <folder_path> [--suffix <name>] [--latest]
 
 Arguments:
     <folder_path>   Path to the folder containing Reading_Frames.dat.
@@ -16,6 +16,7 @@ using CSV
 using FilePathsBase
 using Logging
 import Base.Filesystem: joinpath, dirname, isfile
+include("path_utils.jl")
 
 """
 Reads `Reading_Frames.dat` where each block is 3 lines:
@@ -105,12 +106,29 @@ end
 
 function main()
     if length(ARGS) < 1
-        println("Usage: julia read_samfire_frames.jl <folder_path>")
+        println("Usage: julia read_samfire_frames.jl <folder_path> [--suffix <name>] [--latest]")
         exit(1)
     end
 
     folder_path = ARGS[1]
-    dat_filepath = joinpath(folder_path, "Reading_Frames.dat")
+    suffix = ""
+    latest = true
+    i = 2
+    while i <= length(ARGS)
+        arg = ARGS[i]
+        if arg == "--suffix"
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                i += 1
+                suffix = ARGS[i]
+            end
+        elseif arg == "--latest"
+            latest = true
+        end
+        i += 1
+    end
+
+    # Inputs should not use suffix; allow latest fallback among candidates
+    dat_filepath = resolve_read(joinpath(folder_path, "Reading_Frames.dat"); suffix="", latest=latest)
 
     if !isfile(dat_filepath)
         println("The file 'Reading_Frames.dat' was not found in '$folder_path'. Searching for 'sequences.fa' instead.")
@@ -120,8 +138,9 @@ function main()
     frames_df = read_dat_file(dat_filepath)
     println("Generated DataFrame:")
     display(frames_df)
-
-    save_dataframe_as_csv(frames_df, dat_filepath, "frames.csv")
+    out_csv = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
+    CSV.write(out_csv, frames_df)
+    println("DataFrame successfully saved to $out_csv")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

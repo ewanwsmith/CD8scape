@@ -5,7 +5,7 @@ read_ncbi_frames.jl
 Reads NCBI reference frames from sequences.fasta for open reading frame extraction.
 
 Usage:
-    julia read_ncbi_frames.jl <folder_path>
+    julia read_ncbi_frames.jl <folder_path> [--suffix <name>] [--latest]
 
 Arguments:
     <folder_path>   Path to the folder containing sequences.fasta.
@@ -28,6 +28,7 @@ using DataFrames
 using CSV
 using FilePathsBase
 import Base.Filesystem: joinpath, abspath, isfile, findfirst
+include("path_utils.jl")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Parse the FASTA header, extracting Region (like "77,496" or "77,496;606,980") 
@@ -165,33 +166,43 @@ end
 # ──────────────────────────────────────────────────────────────────────────────
 function main()
     if length(ARGS) < 1
-        println("Usage: julia read_ncbi_frames.jl <folder_path>")
+        println("Usage: julia read_ncbi_frames.jl <folder_path> [--suffix <name>] [--latest]")
         return
     end
 
     folder_path = abspath(ARGS[1])
+    suffix = ""
+    latest = true
+    i = 2
+    while i <= length(ARGS)
+        arg = ARGS[i]
+        if arg == "--suffix"
+            if i + 1 <= length(ARGS) && !startswith(ARGS[i+1], "--")
+                i += 1
+                suffix = ARGS[i]
+            end
+        elseif arg == "--latest"
+            latest = true
+        end
+        i += 1
+    end
 
     # Attempt to find sequences.(fa|fasta)
-    possible_paths_seq = [
-        joinpath(folder_path, "sequences.fa"),
-        joinpath(folder_path, "sequences.fasta")
-    ]
-    idx_seq = findfirst(isfile, possible_paths_seq)
-    if idx_seq === nothing
-        error("No sequences.fa or sequences.fasta file found in $folder_path")
+    # Discover sequences file (inputs should not use suffix; allow latest fallback).
+    # Try .fa first; if not found, fall back to .fasta.
+    sequences_fa = try
+        resolve_read(joinpath(folder_path, "sequences.fa"); suffix="", latest=latest)
+    catch
+        resolve_read(joinpath(folder_path, "sequences.fasta"); suffix="", latest=latest)
     end
-    sequences_fa = possible_paths_seq[idx_seq]
 
     # Attempt to find .consensus(fa|fasta)
-    possible_paths_cons = [
-        joinpath(folder_path, "consensus.fa"),
-        joinpath(folder_path, "consensus.fasta")
-    ]
-    idx_cons = findfirst(isfile, possible_paths_cons)
-    if idx_cons === nothing
-        error("No consensus.fa or consensus.fasta file found in $folder_path")
+    # Discover consensus file (inputs should not use suffix; allow latest fallback).
+    consensus_fa = try
+        resolve_read(joinpath(folder_path, "consensus.fa"); suffix="", latest=latest)
+    catch
+        resolve_read(joinpath(folder_path, "consensus.fasta"); suffix="", latest=latest)
     end
-    consensus_fa = possible_paths_cons[idx_cons]
 
     println("Using sequences file: $sequences_fa")
     println("Using consensus file: $consensus_fa")
@@ -211,7 +222,7 @@ function main()
     final_df = select(df, :Region, :Consensus_sequence, :Description)
 
     # 4) Write final DataFrame to frames.csv
-    output_csv = joinpath(folder_path, "frames.csv")
+    output_csv = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
     CSV.write(output_csv, final_df)
     println("DataFrame written to $output_csv with columns: Region, Consensus_sequence, Description")
 end
