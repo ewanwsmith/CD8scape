@@ -391,8 +391,6 @@ function main()
         shown_list = kept_logs_list[1:shown]
         msg = "Cleanup summary (verbose): kept peptides=$(keep_pep), kept outputs=$(keep_out), kept logs=$(keep_logs). Deleted peptides=$(del_pep), outputs=$(del_out), logs=$(del_logs). Kept logs (showing $(shown)" * (remaining > 0 ? ", +$(remaining) more" : "") * "): "
         println(msg, join(shown_list, ", "))
-    else
-        println("Cleanup summary: deleted peptides=$(del_pep), outputs=$(del_out), logs=$(del_logs).")
     end
 end
 
