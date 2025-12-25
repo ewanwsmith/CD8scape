@@ -343,14 +343,105 @@ function main()
         wait(reporter_task)
     end
     open(xlsfile_path, "w") do out_io
-        for (i, temp_file) in enumerate(temp_out_files)
-            open(temp_file, "r") do in_io
-                for (j, line) in enumerate(eachline(in_io))
-                    # Write header only for first file
-                    if i == 1 || (j > 1 && !startswith(line, "#"))
-                        println(out_io, line)
+        # Write a combined allele header line using the alleles from alleles_file
+        # Start with two leading tabs to mirror NetMHCpan output formatting
+        println(out_io, "\t\t" * join(allele_list, '\t'))
+
+        # Group temp output files by chunk index so we can horizontally merge per-allele columns
+        # Expect filenames like _temp_netMHCpan_output_<chunk>_<allele>.tsv
+        chunk_map = Dict{Int, Vector{String}}()
+        for f in temp_out_files
+            m = match(r"_temp_netMHCpan_output_(\d+)_(\d+)\.tsv$", f)
+            if m === nothing
+                error("Unexpected temp file name format: $f")
+            end
+            chunk_idx = parse(Int, m.captures[1])
+            allele_idx = parse(Int, m.captures[2])
+            arr = get!(chunk_map, chunk_idx, Vector{String}())
+            # ensure vector is big enough
+            if length(arr) < length(allele_list)
+                resize!(arr, length(allele_list))
+            end
+            arr[allele_idx] = f
+            chunk_map[chunk_idx] = arr
+        end
+
+        # Build combined column header from the first complete chunk found
+        sorted_chunks = sort(collect(keys(chunk_map)))
+        if isempty(sorted_chunks)
+            error("No temporary NetMHCpan output files found to merge.")
+        end
+        header_built = false
+        for chunk_idx in sorted_chunks
+            files_vec = chunk_map[chunk_idx]
+            # check files exist and are non-missing
+            if any(x -> x === nothing || !isfile(x), files_vec)
+                continue
+            end
+            # Read the second line (column header) from each allele file and build the combined header
+            fixed_header = String[]
+            allele_cols = Vector{Vector{String}}(undef, length(files_vec))
+            for (ai, fpath) in enumerate(files_vec)
+                lines = collect(eachline(fpath))
+                if length(lines) < 2
+                    continue
+                end
+                cols = split(lines[2], '\t')
+                if isempty(fixed_header)
+                    append!(fixed_header, cols[1:min(3, length(cols))])
+                end
+                if length(cols) > 3
+                    allele_cols[ai] = cols[4:end]
+                else
+                    allele_cols[ai] = String[]
+                end
+            end
+            # If any allele columns are missing, skip this chunk and try another chunk
+            if any(x -> x === nothing, allele_cols)
+                continue
+            end
+            # Flatten allele columns preserving allele order
+            concat_allele_cols = reduce(vcat, allele_cols)
+            combined_cols = vcat(fixed_header, concat_allele_cols)
+            println(out_io, join(combined_cols, '\t'))
+            header_built = true
+            break
+        end
+        if !header_built
+            error("Could not construct combined column header from temporary outputs.")
+        end
+
+        # Now write merged data rows, chunk by chunk
+        for chunk_idx in sorted_chunks
+            files_vec = chunk_map[chunk_idx]
+            # Ensure all allele files exist for this chunk
+            if any(x -> x === nothing || !isfile(x), files_vec)
+                error("Missing allele outputs for chunk $(chunk_idx). Cannot merge chunk.")
+            end
+            # Read all lines for each allele
+            lines_per_allele = [collect(eachline(f)) for f in files_vec]
+            nlines = length(lines_per_allele[1])
+            # Validate all allele files have same number of lines
+            for l in lines_per_allele
+                if length(l) != nlines
+                    error("Mismatched line counts in chunk $(chunk_idx) allele outputs.")
+                end
+            end
+            # Iterate over data rows (skip the two header lines)
+            for row_idx in 3:nlines
+                # Take fixed columns from first allele row
+                first_parts = split(lines_per_allele[1][row_idx], '\t')
+                fixed = first_parts[1:min(3, length(first_parts))]
+                # Append allele-specific columns in allele order
+                combined_row = String[]
+                append!(combined_row, fixed)
+                for ai in 1:length(files_vec)
+                    parts = split(lines_per_allele[ai][row_idx], '\t')
+                    if length(parts) >= 4
+                        append!(combined_row, parts[4:end])
                     end
                 end
+                println(out_io, join(combined_row, '\t'))
             end
         end
     end
