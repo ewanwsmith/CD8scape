@@ -195,10 +195,18 @@ end
 # Pivot best_ranks to have separate columns for HMBR_A and HMBR_D
     println("Calculating harmonic mean best ranks (HMBR) per Frame/Locus/Mutation...")
     if !isempty(best_ranks)
+        # Compute harmonic mean while ignoring NaN/missing/zero values
+        function safe_harmmean(xs)
+            vals = [float(x) for x in xs if !(ismissing(x) || (x isa AbstractFloat && isnan(x)) || !(x > 0))]
+            isempty(vals) && return NaN
+            return harmmean(vals)
+        end
+
         pivot_df = unstack(
             combine(groupby(best_ranks, [:Frame, :Locus, :Mutation, :Peptide_Type]),
-                    :Best_EL_Rank => harmmean => :HMBR),
+                    :Best_EL_Rank => safe_harmmean => :HMBR),
             :Peptide_Type, :HMBR)
+
     # Only rename columns if they exist
     colnames = names(pivot_df)
     rename_pairs = Pair{Symbol,Symbol}[]
@@ -217,15 +225,17 @@ end
         println("Warning: No derived peptides found. Skipping fold change calculations and HMBR_D output.")
     end
 
-    # Identify and report missing values before fold change calculation (per Locus, Mutation)
+    # Identify and report missing/NaN values before fold change calculation (per Locus, Mutation)
     missing_msgs = Set{Tuple{Int,String,String}}()  # (Locus, Mutation, which)
     for row in eachrow(pivot_df)
         locus = row.Locus
         change = get(row, :Mutation, "?")
-        if ismissing(get(row, :HMBR_A, missing))
+        hA = get(row, :HMBR_A, NaN)
+        hD = get(row, :HMBR_D, NaN)
+        if (ismissing(hA) || (hA isa AbstractFloat && isnan(hA)))
             push!(missing_msgs, (locus, String(change), "ancestral"))
         end
-        if ismissing(get(row, :HMBR_D, missing))
+        if (ismissing(hD) || (hD isa AbstractFloat && isnan(hD)))
             push!(missing_msgs, (locus, String(change), "derived"))
         end
     end
@@ -235,7 +245,12 @@ end
 
     # Filter out loci where both HMBR_A and HMBR_D are greater than 2 (non-binding)
     before_filter = nrow(pivot_df)
-    pivot_df = filter(row -> !ismissing(get(row, :HMBR_A, missing)) && !ismissing(get(row, :HMBR_D, missing)) && !(get(row, :HMBR_A, 0.0) > 2 && get(row, :HMBR_D, 0.0) > 2), pivot_df)
+    pivot_df = filter(row -> begin
+            hA = get(row, :HMBR_A, NaN)
+            hD = get(row, :HMBR_D, NaN)
+            # keep only rows where both HMBR values are finite numbers
+            !(ismissing(hA) || (hA isa AbstractFloat && isnan(hA)) || ismissing(hD) || (hD isa AbstractFloat && isnan(hD))) && !(hA > 2 && hD > 2)
+        end, pivot_df)
     removed_count = before_filter - nrow(pivot_df)
     println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
 
