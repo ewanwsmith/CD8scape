@@ -29,17 +29,20 @@ my $total_cols = scalar(@header_cols);
 my $haplotype_start = 3;
 my $available_haplotype_cols = $total_cols - 3;
 
-# Determine whether haplotypes use 4 or 6 columns
-my $cols_per_haplotype;
-if ($available_haplotype_cols >= $num_haplotypes * 6) {
-    my @first_6_block = @header_cols[$haplotype_start .. ($haplotype_start + 5)];
-    if (grep { $_ eq 'BA-score' } @first_6_block) {
-        $cols_per_haplotype = 6;
+# Determine per-haplotype column width robustly and extract the per-haplotype column names
+my $cols_per_haplotype = 4;
+if ($num_haplotypes > 0) {
+    # Prefer exact division if possible
+    if ($available_haplotype_cols % $num_haplotypes == 0) {
+        $cols_per_haplotype = int($available_haplotype_cols / $num_haplotypes);
     } else {
-        $cols_per_haplotype = 4;
+        # Fallback heuristic: try 6 then 4
+        if ($available_haplotype_cols >= $num_haplotypes * 6) {
+            $cols_per_haplotype = 6;
+        } else {
+            $cols_per_haplotype = 4;
+        }
     }
-} else {
-    $cols_per_haplotype = 4;
 }
 
 # Verify enough columns for haplotype data
@@ -47,9 +50,11 @@ my $expected_allele_cols = $num_haplotypes * $cols_per_haplotype;
 die "Not enough columns in the header line for $num_haplotypes haplotype(s) using $cols_per_haplotype columns each.\n"
     if ($available_haplotype_cols < $expected_allele_cols);
 
-# Construct new header
-my @final_header = ('Pos', 'Peptide', 'ID', 'HLA', 'core', 'icore', 'EL-score', 'EL_Rank');
-push @final_header, ('BA-score', 'BA_Rank') if $cols_per_haplotype == 6;
+# Extract per-haplotype column names from the header (use the first block)
+my @per_haplotype_cols = @header_cols[$haplotype_start .. ($haplotype_start + $cols_per_haplotype - 1)];
+
+# Construct new header using the actual per-haplotype column names
+my @final_header = ('Pos', 'Peptide', 'ID', 'HLA', @per_haplotype_cols);
 print join(",", @final_header), "\n";
 
 # Process data rows
