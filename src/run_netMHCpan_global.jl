@@ -480,36 +480,102 @@ function main()
     # Ensure the progress line ends with a newline before merging message
     print("\n")
     status("Merging chunk outputs into $xlsfile_path ...")
+
     open(xlsfile_path, "w") do out_io
-        for (i, temp_file) in enumerate(temp_out_files)
-            open(temp_file, "r") do in_io
-                for (j, line) in enumerate(eachline(in_io))
-                    # Write header only for first file
-                    if i == 1 || (j > 1 && !startswith(line, "#"))
-                        println(out_io, line)
+        # Write a combined allele header line using the alleles from allele_list
+        # Start with two leading tabs to mirror NetMHCpan XLS formatting
+        println(out_io, "\t\t" * join(allele_list, '\t'))
+
+        # Group temp output files by chunk index so we can horizontally merge per-allele columns
+        chunk_map = Dict{Int, Vector{String}}()
+        for f in temp_out_files
+            m = match(r"_temp_netMHCpan_output_(\d+)_(\d+)\.tsv$", f)
+            if m === nothing
+                error("Unexpected temp file name format: $f")
+            end
+            chunk_idx = parse(Int, m.captures[1])
+            allele_idx = parse(Int, m.captures[2])
+            arr = get!(chunk_map, chunk_idx, Vector{String}())
+            if length(arr) < length(allele_list)
+                resize!(arr, length(allele_list))
+            end
+            arr[allele_idx] = f
+            chunk_map[chunk_idx] = arr
+        end
+
+        sorted_chunks = sort(collect(keys(chunk_map)))
+        if isempty(sorted_chunks)
+            # No temp outputs; write a minimal stub to satisfy Perl
+            println(out_io, join(allele_list, '\t'))
+            header = String["Pos", "Peptide", "ID"]
+            for _ in allele_list
+                append!(header, ["core", "icore", "EL-score", "EL_Rank"])
+            end
+            println(out_io, join(header, '\t'))
+        else
+            # Build combined column header from first complete chunk
+            header_built = false
+            for chunk_idx in sorted_chunks
+                files_vec = chunk_map[chunk_idx]
+                if any(x -> x === nothing || !isfile(x), files_vec)
+                    continue
+                end
+                fixed_header = String[]
+                allele_cols = Vector{Vector{String}}(undef, length(files_vec))
+                for (ai, fpath) in enumerate(files_vec)
+                    lines = collect(eachline(fpath))
+                    if length(lines) < 2
+                        continue
+                    end
+                    cols = split(lines[2], '\t')
+                    if isempty(fixed_header)
+                        append!(fixed_header, cols[1:min(3, length(cols))])
+                    end
+                    allele_cols[ai] = length(cols) > 3 ? cols[4:end] : String[]
+                end
+                if any(x -> x === nothing, allele_cols)
+                    continue
+                end
+                concat_allele_cols = reduce(vcat, allele_cols)
+                combined_cols = vcat(fixed_header, concat_allele_cols)
+                println(out_io, join(combined_cols, '\t'))
+                header_built = true
+                break
+            end
+            if !header_built
+                error("Could not construct combined column header from temporary outputs.")
+            end
+
+            # Write merged data rows, chunk by chunk
+            for chunk_idx in sorted_chunks
+                files_vec = chunk_map[chunk_idx]
+                if any(x -> x === nothing || !isfile(x), files_vec)
+                    error("Missing allele outputs for chunk $(chunk_idx). Cannot merge chunk.")
+                end
+                lines_per_allele = [collect(eachline(f)) for f in files_vec]
+                nlines = length(lines_per_allele[1])
+                for l in lines_per_allele
+                    if length(l) != nlines
+                        error("Mismatched line counts in chunk $(chunk_idx) allele outputs.")
                     end
                 end
-            end
-        end
-    end
-    # If merged file is empty (no outputs), write a minimal stub matching Perl expectations
-    try
-        sz = filesize(xlsfile_path)
-        if sz == 0
-            open(xlsfile_path, "w") do out_io
-                # Allele line: tab-separated allele names (without '*')
-                println(out_io, join(allele_list, "\t"))
-                # Header line: Pos, Peptide, ID, then 4 columns per allele: core, icore, EL-score, EL_Rank
-                header = String["Pos", "Peptide", "ID"]
-                for _ in allele_list
-                    append!(header, ["core", "icore", "EL-score", "EL_Rank"])
+                for row_idx in 3:nlines
+                    first_parts = split(lines_per_allele[1][row_idx], '\t')
+                    fixed = first_parts[1:min(3, length(first_parts))]
+                    combined_row = String[]
+                    append!(combined_row, fixed)
+                    for ai in 1:length(files_vec)
+                        parts = split(lines_per_allele[ai][row_idx], '\t')
+                        if length(parts) >= 4
+                            append!(combined_row, parts[4:end])
+                        end
+                    end
+                    println(out_io, join(combined_row, '\t'))
                 end
-                println(out_io, join(header, "\t"))
             end
         end
-    catch
-        # If filesize check fails, proceed without stub
     end
+
     status("Merged output written to $xlsfile_path")
     # Cleanup temp files
     status("Cleaning up temporary files...")
