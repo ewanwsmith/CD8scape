@@ -21,7 +21,8 @@ include("path_utils.jl")
 # Weighted harmonic mean for positive values only; returns `missing` if no valid terms
 function hmean_weighted(x::AbstractVector, w::AbstractVector)
     @assert length(x) == length(w) "x and w must have the same length"
-    keep = .!ismissing.(x) .& .!ismissing.(w) .& (w .> 0) .& (x .> 0)
+    # Treat NaN like missing and ignore non-positive values
+    keep = .!ismissing.(x) .& .!ismissing.(w) .& .!isnan.(Float64.(x)) .& (w .> 0) .& (Float64.(x) .> 0)
     if !any(keep)
         return missing
     end
