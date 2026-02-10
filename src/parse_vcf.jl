@@ -50,7 +50,7 @@ function main()
     select!(vcf_dataframe, [:POS, :REF, :ALT])
 
     # Expand multi-allelic ALT (comma-separated) into one row per ALT.
-    # Also filter to SNVs (single-base REF and ALT) to match downstream expectations.
+    # Include all variants: SNVs, indels, and multi-base substitutions.
     expanded = DataFrame(POS=Int[], REF=String[], ALT=String[])
     for r in eachrow(vcf_dataframe)
         ref = String(r[:REF])
@@ -58,8 +58,8 @@ function main()
         alts = split(String(r[:ALT]), ",")
         for alt in alts
             alt_str = String(alt)
-            # Keep only SNVs: single-base REF and ALT, A/C/G/T
-            if length(ref) == 1 && length(alt_str) == 1 && occursin(r"^[ACGTacgt]$", ref) && occursin(r"^[ACGTacgt]$", alt_str)
+            # Keep variants with valid ACGT nucleotides (SNVs, indels, multi-base subs)
+            if occursin(r"^[ACGTacgt]+$", ref) && occursin(r"^[ACGTacgt]+$", alt_str)
                 push!(expanded, (Int(r[:POS]), uppercase(ref), uppercase(alt_str)))
             end
         end
@@ -70,6 +70,9 @@ function main()
     #   REF  -> Consensus
     #   ALT  -> Variant
     rename!(expanded, :POS => :Locus, :REF => :Consensus, :ALT => :Variant)
+
+    # Sort by Locus
+    sort!(expanded, :Locus)
 
     # Write out the CSV named 'variants.csv' in the same folder
     output_file_path = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
