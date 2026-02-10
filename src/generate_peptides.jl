@@ -370,15 +370,13 @@ function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol
             consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Ancestral_AA_sequence)) ? row.Ancestral_AA_sequence[row.AA_Locus] : "?"
             variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Derived_AA_sequence)) ? row.Derived_AA_sequence[row.AA_Locus] : "?"
 
-            # Skip this variant if the amino acid doesn't change (e.g., M1M)
-            if consensus_aa != variant_aa
-                change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
-                base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
+            # Include all variants (synonymous filtering happens in separate_peptides)
+            change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
+            base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
 
-                for (i, (c, v)) in enumerate(zip(cps, vps))
-                    label = "$(base)_$(i)"
-                    push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
-                end
+            for (i, (c, v)) in enumerate(zip(cps, vps))
+                label = "$(base)_$(i)"
+                push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
             end
         elseif is_indel
             # Label indels as del/ins + Locus + only what was deleted or inserted
@@ -457,7 +455,7 @@ function separate_peptides(df::DataFrame)::DataFrame
             synonymous = !c_missing && !v_missing && c == v
             keep_c = !c_missing && !c_stop && !synonymous
             keep_v = !v_missing && !v_stop && !synonymous
-            keep_c || keep_v
+            keep_c && keep_v
         end, df)
 
     println("Removed $removed_syn_rows peptides from $removed_syn_loci loci due to synonymity.")
