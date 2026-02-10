@@ -142,16 +142,127 @@ Removed filtering on ancestral match so that all rows are retained here.
 # Returns
 - The same DataFrame with added Relative_Locus, Pulled_Base, and Matches_Consensus columns.
 """
+function normalize_variant(ref::AbstractString, alt::AbstractString)
+    r = String(ref)
+    a = String(alt)
+    # Trim common suffix while keeping at least 1 base in each (VCF-style)
+    while length(r) > 1 && length(a) > 1 && last(r) == last(a)
+        r = r[1:end-1]
+        a = a[1:end-1]
+    end
+    prefix_trim = 0
+    while length(r) > 1 && length(a) > 1 && first(r) == first(a)
+        r = r[2:end]
+        a = a[2:end]
+        prefix_trim += 1
+    end
+    return r, a, prefix_trim
+end
+
+function find_ref_match(consensus::AbstractString, ref::AbstractString, rl::Int; window::Int=10, max_mismatch::Int=0)
+    seq = String(consensus)
+    r = String(ref)
+    rlen = length(r)
+    if rlen == 0
+        return rl, true
+    end
+    min_pos = max(1, rl - window)
+    max_pos = min(length(seq) - rlen + 1, rl + window)
+    best = nothing
+    for pos in min_pos:max_pos
+        window_ref = seq[pos:(pos + rlen - 1)]
+        mismatches = 0
+        if window_ref == r
+            mismatches = 0
+        else
+            for i in 1:rlen
+                if window_ref[i] != r[i]
+                    mismatches += 1
+                    if mismatches > max_mismatch
+                        break
+                    end
+                end
+            end
+        end
+        if mismatches <= max_mismatch
+            dist = abs(pos - rl)
+            best = best === nothing ? (dist, mismatches, pos) :
+                (dist < best[1] || (dist == best[1] && mismatches < best[2]) ? (dist, mismatches, pos) : best)
+        end
+    end
+    return best === nothing ? (rl, false) : (best[3], true)
+end
+
 function check_locus(df::DataFrame)::DataFrame
+    # Normalize variant representation (trim common prefix/suffix) and optionally realign
+    norm_ref = String[]
+    norm_alt = String[]
+    adjusted_locus = Int[]
+    matches = Bool[]
+
+    for row in eachrow(df)
+        ref = String(row.Consensus)
+        alt = String(row.Variant)
+        r, a, prefix_trim = normalize_variant(ref, alt)
+        adj = row.Locus + prefix_trim
+        # Compute Relative_Locus from adjusted position
+        rl = adj - row.Start + 1
+        # If ref does not match at the adjusted position, try to find nearby match
+        ref_match = false
+        if 1 ≤ rl && rl + length(r) - 1 ≤ length(row.Consensus_sequence)
+            ref_match = row.Consensus_sequence[rl:(rl + length(r) - 1)] == r
+        end
+        if !ref_match
+            # allow a small number of mismatches to tolerate minor ref discrepancies
+            new_rl, ok = find_ref_match(row.Consensus_sequence, r, rl; window=10, max_mismatch=1)
+            if ok
+                adj = row.Start + new_rl - 1
+                rl = new_rl
+                if 1 ≤ rl && rl + length(r) - 1 ≤ length(row.Consensus_sequence)
+                    r = row.Consensus_sequence[rl:(rl + length(r) - 1)]
+                end
+                ref_match = true
+            else
+                # normalize against consensus at the adjusted locus
+                ref_len = length(r)
+                if 1 ≤ rl && rl + ref_len - 1 ≤ length(row.Consensus_sequence)
+                    r = row.Consensus_sequence[rl:(rl + ref_len - 1)]
+                    ref_match = true
+                    @warn "Reference allele mismatch at Locus $(row.Locus). Normalizing REF to consensus sequence."
+                end
+            end
+        end
+        push!(norm_ref, r)
+        push!(norm_alt, a)
+        push!(adjusted_locus, adj)
+        push!(matches, ref_match)
+    end
+
+    df[!, :Normalized_Consensus] = norm_ref
+    df[!, :Normalized_Variant] = norm_alt
+    df[!, :Adjusted_Locus] = adjusted_locus
+    df[!, :Matches_Consensus] = matches
+
     # Fix: make Relative_Locus 1-based (first nucleotide in frame is 1)
-    df[!, :Relative_Locus] = df.Locus .- df.Start .+ 1
-    
+    df[!, :Relative_Locus] = df.Adjusted_Locus .- df.Start .+ 1
+
     df[!, :Pulled_Base] = [
-        (1 ≤ rl ≤ length(seq) ? string(seq[rl]) : missing)
-        for (rl, seq) in zip(df.Relative_Locus, df.Consensus_sequence)
+        begin
+            if ismissing(rl)
+                missing
+            else
+                ref = String(cons)
+                ref_len = length(ref)
+                if 1 ≤ rl && rl + ref_len - 1 ≤ length(seq)
+                    string(seq[rl:(rl + ref_len - 1)])
+                else
+                    missing
+                end
+            end
+        end
+        for (rl, seq, cons) in zip(df.Relative_Locus, df.Consensus_sequence, df.Normalized_Consensus)
     ]
-    
-    df[!, :Matches_Consensus] = coalesce.(df.Pulled_Base .== df.Consensus, false)
+
     return df
 end
 
@@ -171,12 +282,21 @@ function edit_ancestral_sequence(df::DataFrame)::DataFrame
     for row in eachrow(df)
         rl = row.Relative_Locus
         consensus = row.Consensus_sequence
-        variant_nt = row.Variant
+        variant_nt = String(row.Normalized_Variant)
+        ref_nt = String(row.Normalized_Consensus)
 
         if !ismissing(rl) && 1 ≤ rl ≤ length(consensus)
-            seq = collect(consensus)
-            seq[rl] = variant_nt[1]
-            row.Derived_sequence = join(seq)
+            ref_len = length(ref_nt)
+            seq_len = length(consensus)
+            if rl + ref_len - 1 ≤ seq_len && consensus[rl:(rl + ref_len - 1)] == ref_nt
+                prefix = rl > 1 ? consensus[1:(rl - 1)] : ""
+                suffix_start = rl + ref_len
+                suffix = suffix_start ≤ seq_len ? consensus[suffix_start:end] : ""
+                row.Derived_sequence = string(prefix, variant_nt, suffix)
+            else
+                @warn "Reference allele mismatch or out of bounds at Locus $(row.Locus). Keeping consensus sequence."
+                row.Derived_sequence = consensus
+            end
         else
             row.Derived_sequence = consensus
         end
@@ -233,8 +353,8 @@ function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol
         Locus = Int[],
         Relative_Locus = Int[],
         AA_Locus = Int[],
-        Ancestral_Peptide = String[],
-        Derived_Peptide = String[],
+        Ancestral_Peptide = Union{Missing,String}[],
+        Derived_Peptide = Union{Missing,String}[],
         Peptide_label = String[]
     )
 
@@ -242,19 +362,59 @@ function add_peptides_columns!(df::DataFrame, rl::Symbol, cs::Symbol, vs::Symbol
         cps = generate_peptides(row[cs], row.AA_Locus, lens)
         vps = generate_peptides(row[vs], row.AA_Locus, lens)
 
-        if length(cps) == length(vps)
+        ref_nt = String(row.Normalized_Consensus)
+        alt_nt = String(row.Normalized_Variant)
+        is_indel = length(ref_nt) != length(alt_nt)
+
+        if length(cps) == length(vps) && !is_indel
+            consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Ancestral_AA_sequence)) ? row.Ancestral_AA_sequence[row.AA_Locus] : "?"
+            variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Derived_AA_sequence)) ? row.Derived_AA_sequence[row.AA_Locus] : "?"
+
+            # Skip this variant if the amino acid doesn't change (e.g., M1M)
+            if consensus_aa != variant_aa
+                change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
+                base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
+
+                for (i, (c, v)) in enumerate(zip(cps, vps))
+                    label = "$(base)_$(i)"
+                    push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
+                end
+            end
+        elseif is_indel
+            # Label indels as del/ins + Locus + only what was deleted or inserted
+            if length(ref_nt) > length(alt_nt)
+                # Deletion: show only the deleted nucleotides
+                deleted = lowercase(ref_nt[length(alt_nt)+1:end])
+                change_label = "del$(row.Locus)$(deleted)"
+            else
+                # Insertion: show only the inserted nucleotides
+                inserted = lowercase(alt_nt[length(ref_nt)+1:end])
+                change_label = "ins$(row.Locus)$(inserted)"
+            end
+            base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
+
+            maxlen = max(length(cps), length(vps))
+            for i in 1:maxlen
+                label = "$(base)_$(i)"
+                c = i <= length(cps) ? cps[i] : missing
+                v = i <= length(vps) ? vps[i] : missing
+                push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
+            end
+        else
             consensus_aa = (1 ≤ row.AA_Locus ≤ length(row.Ancestral_AA_sequence)) ? row.Ancestral_AA_sequence[row.AA_Locus] : "?"
             variant_aa = (1 ≤ row.AA_Locus ≤ length(row.Derived_AA_sequence)) ? row.Derived_AA_sequence[row.AA_Locus] : "?"
 
             change_label = "$(consensus_aa)$(row.AA_Locus)$(variant_aa)"
             base = "$(change_label)_$(replace(String(row.Description), " " => "_"))"
 
-            for (i, (c, v)) in enumerate(zip(cps, vps))
+            maxlen = max(length(cps), length(vps))
+            for i in 1:maxlen
                 label = "$(base)_$(i)"
+                c = i <= length(cps) ? cps[i] : missing
+                v = i <= length(vps) ? vps[i] : missing
                 push!(out, (row.Locus, row.Relative_Locus, row.AA_Locus, c, v, label))
             end
-        else
-            @warn "Mismatched peptide counts at Locus $(row.Locus). Skipping."
+            @warn "Mismatched peptide counts at Locus $(row.Locus). Emitting all available peptides (A=$(length(cps)), D=$(length(vps)))."
         end
     end
 
@@ -276,20 +436,29 @@ Only non-synonymous variants (where ancestral and derived peptides differ) are r
 - A DataFrame with separate rows for ancestral and derived peptides.
 """
 function separate_peptides(df::DataFrame)::DataFrame
-    # Retain only rows where the consensus peptide and variant peptide differ.
+    # Retain peptides where at least one non-missing peptide is valid and non-synonymous
     initial_rows = nrow(df)
-    
-    # Identify loci dropped for synonymity and stop codons separately
-    dropped_syn_df = filter(row -> row.Ancestral_Peptide == row.Derived_Peptide, df)
-    dropped_stop_df = filter(row -> occursin('*', row.Ancestral_Peptide) || occursin('*', row.Derived_Peptide), df)
+
+    dropped_syn_df = filter(row -> !ismissing(row.Ancestral_Peptide) && !ismissing(row.Derived_Peptide) && row.Ancestral_Peptide == row.Derived_Peptide, df)
+    dropped_stop_df = filter(row -> (!ismissing(row.Ancestral_Peptide) && occursin('*', row.Ancestral_Peptide)) ||
+                                   (!ismissing(row.Derived_Peptide) && occursin('*', row.Derived_Peptide)), df)
     removed_syn_loci = length(unique(dropped_syn_df.Locus))
     removed_stop_loci = length(unique(dropped_stop_df.Locus))
     removed_syn_rows = nrow(dropped_syn_df)
     removed_stop_rows = nrow(dropped_stop_df)
 
-    filtered_df = filter(row -> row.Ancestral_Peptide != row.Derived_Peptide &&
-                                !occursin('*', row.Ancestral_Peptide) &&
-                                !occursin('*', row.Derived_Peptide), df)
+    filtered_df = filter(row -> begin
+            c = row.Ancestral_Peptide
+            v = row.Derived_Peptide
+            c_missing = ismissing(c)
+            v_missing = ismissing(v)
+            c_stop = !c_missing && occursin('*', c)
+            v_stop = !v_missing && occursin('*', v)
+            synonymous = !c_missing && !v_missing && c == v
+            keep_c = !c_missing && !c_stop && !synonymous
+            keep_v = !v_missing && !v_stop && !synonymous
+            keep_c || keep_v
+        end, df)
 
     println("Removed $removed_syn_rows peptides from $removed_syn_loci loci due to synonymity.")
     println("Removed $removed_stop_rows peptides from $removed_stop_loci loci due to stop codons.")
@@ -301,19 +470,29 @@ function separate_peptides(df::DataFrame)::DataFrame
     )
 
     for row in eachrow(filtered_df)
-        # Add ancestral peptide row
-        push!(transformed_df, (
-            row.Locus,
-            row.Ancestral_Peptide,
-            "$(row.Peptide_label)_A"
-        ))
+        c = row.Ancestral_Peptide
+        v = row.Derived_Peptide
+        c_missing = ismissing(c)
+        v_missing = ismissing(v)
+        c_stop = !c_missing && occursin('*', c)
+        v_stop = !v_missing && occursin('*', v)
+        synonymous = !c_missing && !v_missing && c == v
 
-        # Add derived peptide row
-        push!(transformed_df, (
-            row.Locus,
-            row.Derived_Peptide,
-            "$(row.Peptide_label)_D"
-        ))
+        if !c_missing && !c_stop && !synonymous
+            push!(transformed_df, (
+                row.Locus,
+                c,
+                "$(row.Peptide_label)_A"
+            ))
+        end
+
+        if !v_missing && !v_stop && !synonymous
+            push!(transformed_df, (
+                row.Locus,
+                v,
+                "$(row.Peptide_label)_D"
+            ))
+        end
     end
 
     return transformed_df
