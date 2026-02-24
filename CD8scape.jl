@@ -16,10 +16,10 @@ CD8scape.jl - A tool for running netMHCpan and managing related data.
 
 USAGE:
     ./CD8scape.jl prep
-    ./CD8scape.jl read <folder_path>
-    ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
-    ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
-    ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
+    ./CD8scape.jl read <folder_path> [--suffix <name>] [--latest|--no-latest]
+    ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
+    ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
+    ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
     ./CD8scape.jl percentile <folder_path> [--s <sim_file>] [--o <obs_file>]
   
 
@@ -35,6 +35,14 @@ COMMANDS:
 OPTIONS:
   --help, -h
       Print this help message and exit.
+  --suffix <name>
+      Append _<name> before the file extension of all output files (e.g. --suffix foo
+      produces variants_foo.csv, best_ranks_foo.csv, etc.). For 'simulate', defaults to
+      'simulated' when omitted.
+  --latest (default), --no-latest
+      When reading input files without a suffix, if multiple candidates exist (e.g.
+      frames.csv and frames_simulated.csv), --latest picks the most recently modified
+      file. --no-latest errors on ambiguity instead.
   --t <N|max>, --thread <N|max>
       Max number of chunks to execute in parallel when running NetMHCpan (default 1). Use 'max' to use the safety cap.
   --verbose

@@ -97,13 +97,13 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 
 ### 2. Parse Input Data
 ```bash
-./CD8scape.jl read <folder_path>
+./CD8scape.jl read <folder_path> [--suffix <name>] [--latest|--no-latest]
 ```
 Parses variants and reading frames from the data folder, producing `variants.csv` and `frames.csv`.
 
 ### 3. Simulate Input Data
 ```bash
-./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>]
+./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
 ```
 - Parses reading frames (writes `frames.csv`) and generates exhaustive simulated single-nucleotide variants per reading frame (writes `variants.csv`).
 - Sampling options:
@@ -114,7 +114,7 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
-./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
+./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
 - `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use the safety cap.
@@ -122,7 +122,7 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 
 ### 5. Run Pipeline (Supertype Panel)
 ```bash
-./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
+./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - As above, but uses a representative supertype HLA panel.
 
@@ -135,6 +135,15 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 - `--o <obs_file>`: path to the observed HMBR file (defaults to the most recent `harmonic_mean_best_ranks*.csv` in the data folder, excluding `_simulated`).
 - Observed variants are excluded from the simulated distribution before computing percentiles.
 - Writes `percentile_harmonic_mean_best_ranks.csv` (with a `Percentile` column, 0–100) to the data folder.
+
+### Global Options
+
+The following options are shared across `read`, `simulate`, `run`, and `run_supertype`:
+
+- **`--suffix <name>`**: Append `_<name>` before the file extension of all output files. For example, `--suffix foo` produces `variants_foo.csv`, `best_ranks_foo.csv`, `harmonic_mean_best_ranks_foo.csv`, etc. For `simulate`, the suffix defaults to `simulated` when omitted.
+- **`--latest`** (default) / **`--no-latest`**: Controls how input files are resolved when no `--suffix` is given and multiple candidates exist (e.g. `frames.csv` and `frames_simulated.csv`). `--latest` picks the most recently modified file; `--no-latest` raises an error on ambiguity.
+
+These options allow multiple independent analyses (e.g. observed vs. simulated) to coexist in the same data folder without overwriting each other.
 
 ## Workflow Summary
 1. **prep**: Install dependencies
