@@ -7,7 +7,7 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 - MHC binding prediction using netMHCpan
 - Robust output parsing and best-rank calculation
 - Harmonic mean best rank (HMBR) and fold change analysis
- 
+- Simulated variant generation for percentile benchmarking
 
 ## Requirements
 - Perl 5
@@ -20,46 +20,71 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
    git clone https://github.com/ewanwsmith/CD8scape.git
    cd CD8scape
    ```
-2. Copy `src/settings.txt.example` to `src/settings.txt` and set your netMHCpan path.
+2. Copy `src/settings.txt.example` to `src/settings.txt` and set your netMHCpan path:
    ```bash
    cp src/settings.txt.example src/settings.txt
    # Edit src/settings.txt to set your local NETMHCPAN path
    ```
-3. Install Julia and Perl dependencies:
+3. Install Julia dependencies and validate settings:
    ```bash
    ./CD8scape.jl prep
    ```
+   This activates the project environment, installs required Julia packages, validates the netMHCpan path, and checks that Perl is available.
 
 ## Input Data
 
-CD8scape expects a folder containing the following files:
+CD8scape expects a data folder containing the following files:
 
-- **alleles.txt**: List of HLA alleles, one per line (e.g., `HLA-A01:01`).
-- **Variant file**: Either
-  - `single_locus_trajectories.out` (from [Samfire](https://github.com/cjri/samfire)), or
-  - Any `.out` file with Samfire-compatible format, or
+- **alleles.txt**: List of HLA alleles, one per line (e.g. `HLA-A03:01`). Required for `run`.
+- **supertype_panel.csv**: CSV with columns `Allele` and `Frequency` (and optionally `Locus`). Required for `run_supertype`. Can also be placed in the data folder to override the project default.
+- **Variant file** (one of the following):
   - `.vcf` or `.vcf.gz` file (standard variant call format).
-- **Reading frame file**: Either
-  - `Reading_Frames.dat` (from [Samfire](https://github.com/cjri/samfire)), or
-  - `sequences.fasta` (reference genome from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)).
+  - `single_locus_trajectories.out` from [Samfire](https://github.com/cjri/samfire) (also matches any `single_locus_trajectories*.out`, or falls back to any `.out` file in the folder).
+- **Reading frame file** (one of the following):
+  - `sequences.fasta` **and** `consensus.fa` for the NCBI path: `sequences.fasta` provides ORF definitions with coordinate headers (e.g. from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)), and `consensus.fa` provides the full reference genome from which reading frame subsequences are extracted.
+  - `Reading_Frames.dat` from [Samfire](https://github.com/cjri/samfire).
+
+CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. VCF files are tried first; if no VCF is found or parsing fails, Samfire trajectory parsing is attempted. For reading frames, the NCBI path (`sequences.fasta` + `consensus.fa`) is tried first, falling back to Samfire's `Reading_Frames.dat`.
 
 ### Example: alleles.txt
 ```
+HLA-A03:01
 HLA-A01:01
-HLA-A02:01
+HLA-B08:01
 HLA-B07:02
 HLA-C07:02
+HLA-C07:01
 ```
 
-### Folder Structure Example
+### Folder Structure Examples
+
+Individual genotype run:
 ```
 <your_data_folder>/
     alleles.txt
-    single_locus_trajectories.out   # or variants.vcf
-    Reading_Frames.dat              # or sequences.fasta
+    variants.vcf                    # or single_locus_trajectories.out
+    sequences.fasta                 # NCBI ORF definitions
+    consensus.fa                    # full reference genome
 ```
 
-CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. For Samfire, see [Samfire GitHub](https://github.com/cjri/samfire) for details on generating `.out` and `.dat` files.
+Supertype panel run:
+```
+<your_data_folder>/
+    supertype_panel.csv
+    variants.vcf                    # or single_locus_trajectories.out
+    sequences.fasta
+    consensus.fa
+```
+
+Samfire-only input:
+```
+<your_data_folder>/
+    alleles.txt
+    single_locus_trajectories.out
+    Reading_Frames.dat
+```
+
+For Samfire, see [Samfire GitHub](https://github.com/cjri/samfire) for details on generating `.out` and `.dat` files.
 
 ## Usage
 All commands are run from the repository root:
@@ -68,13 +93,13 @@ All commands are run from the repository root:
 ```bash
 ./CD8scape.jl prep
 ```
-Note: `prep` performs all dependency installation and environment setup. The other commands (`read`, `simulate`, `run`, `run_supertype`) do not install packages and assume the environment is already prepared.
+Note: `prep` performs all dependency installation and environment setup. The other commands (`read`, `simulate`, `run`, `run_supertype`, `percentile`) do not install packages and assume the environment is already prepared.
 
 ### 2. Parse Input Data
 ```bash
 ./CD8scape.jl read <folder_path>
 ```
-- Parses variants and reading frames, outputs `variants.csv` and `frames.csv`.
+Parses variants and reading frames from the data folder, producing `variants.csv` and `frames.csv`.
 
 ### 3. Simulate Input Data
 ```bash
@@ -85,87 +110,46 @@ Note: `prep` performs all dependency installation and environment setup. The oth
    - `--n <count>`: sample an absolute number of variants.
    - `--p <proportion>` (alias `--prop`): sample a proportion in (0,1).
    - If both `--n` and `--p` are provided, `--n` takes precedence.
- - Defaults: `--n` defaults to `1000` and `--p` defaults to `0.1` when you choose to sample by count or proportion; no sampling flags writes all variants. `--seed` sets RNG seed (default: `1320`).
+- Defaults: `--n` defaults to `1000` and `--p` defaults to `0.1` when the flag is provided without a value; omitting both flags writes all variants. `--seed` sets RNG seed (default: `1320`).
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
-./CD8scape.jl run <folder_path> [--t <N>|--thread <N>] [--verbose]
+./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
 ```
 - Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
-- `--t <N|max>`/`--thread <N|max>` runs up to N peptide chunks in parallel (default 1). Use `max` to request the capped maximum. For safety, concurrency is capped by default to half of logical CPUs; if you request above the cap, it will be reduced with a notice. You can adjust the cap with `CD8SCAPE_MAX_THREADS`.
-- `--verbose` preserves per-allele logs and temp files for inspection.
+- `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use the safety cap.
+- `--verbose`: preserve per-allele logs and temp files for debugging.
 
 ### 5. Run Pipeline (Supertype Panel)
 ```bash
-./CD8scape.jl run_supertype <folder_path> [--t <N>|--thread <N>] [--verbose]
+./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--verbose]
 ```
 - As above, but uses a representative supertype HLA panel.
-- `--t <N|max>`/`--thread <N|max>` runs up to N peptide chunks in parallel (default 1). Use `max` to request the capped maximum. For safety, concurrency is capped by default to half of logical CPUs; if you request above the cap, it will be reduced with a notice. You can adjust the cap with `CD8SCAPE_MAX_THREADS`.
 
-### 6. Percentile Scoring
-Compute the percentile of observed variant HMBR log2 fold-change values against a simulated background distribution.
-
+### 6. Compute Percentiles (Benchmarking)
 ```bash
 ./CD8scape.jl percentile <folder_path> [--s <sim_file>] [--o <obs_file>]
 ```
-
-- **Simulation input**: defaults to `harmonic_mean_best_ranks_simulated.csv` in `<folder_path>`. Override with `--s` (relative to folder or absolute path).
-- **Observed input**: defaults to the most recent `harmonic_mean_best_ranks*.csv` in `<folder_path>` whose suffix is not `_simulated`. Override with `--o`.
-- **Overlap handling**: simulated entries that exactly match observed variants (by `Frame|Locus|Mutation` → or `Locus|Mutation` → or `Locus`) are removed before scoring.
-- **Output**: writes `percentile_harmonic_mean_best_ranks(_<suffix>).csv` in `<folder_path>`, adding a new `Percentile` column (0–100).
-
-### Suffixes and Multi‑Run Folders
-- Purpose: Keep outputs from different runs side‑by‑side in the same data folder without clobbering files.
-- Flag: `--suffix <name>` inserts `_name` before file extensions for outputs, and is preferred for inputs when present.
-- Discovery: If the suffixed input is not present, the tool falls back to the most recent matching file when `--latest` is used (default). Disable with `--no-latest`.
-
-Behavior by stage
-- read: Writes `frames_<suffix>.csv` and `variants_<suffix>.csv`.
-- simulate: Defaults to `--suffix simulated` when none provided; writes `frames_simulated.csv` and `variants_simulated.csv`.
-- run: Prefers `frames_<suffix>.csv` and `variants_<suffix>.csv` if they exist; otherwise falls back to latest `frames*.csv` and `variants*.csv`. Outputs are suffixed: `peptides_labels_<suffix>.csv`, `netMHCpan_output_<suffix>.tsv`, `processed_peptides_<suffix>.csv`, etc.
-- run_supertype: Same suffix handling and outputs as `run` but for the supertype panel.
-
-Examples
-```bash
-# Read with a tag
-./CD8scape.jl read /path/to/data --suffix readtag
-
-# Simulate with default suffix 'simulated'
-./CD8scape.jl simulate /path/to/data --n 100
-
-# Simulate with a custom suffix
-./CD8scape.jl simulate /path/to/data --suffix simtag --n 50
-
-# Run using the simulated tag (produces suffixed outputs)
-./CD8scape.jl run /path/to/data --suffix simulated
-
-# Run with a new tag; if frames_<tag>.csv and variants_<tag>.csv don't exist,
-# generate_peptides will fall back to the most recent frames*/variants*.
-./CD8scape.jl run /path/to/data --suffix fallbacktest
-
-# Run supertype with its own tag (same suffix-first, latest-fallback behavior)
-./CD8scape.jl run_supertype /path/to/data --suffix sttag
-```
-
- 
+- Computes observed HMBR log2 fold-change percentiles relative to a simulated distribution.
+- `--s <sim_file>`: path to the simulated HMBR file (defaults to `harmonic_mean_best_ranks_simulated.csv` in the data folder).
+- `--o <obs_file>`: path to the observed HMBR file (defaults to the most recent `harmonic_mean_best_ranks*.csv` in the data folder, excluding `_simulated`).
+- Observed variants are excluded from the simulated distribution before computing percentiles.
+- Writes `percentile_harmonic_mean_best_ranks.csv` (with a `Percentile` column, 0–100) to the data folder.
 
 ## Workflow Summary
 1. **prep**: Install dependencies
-2. **read**: Parse variants and frames
-3. **run/run_supertype**: Generate peptides, predict binding, process output, calculate best ranks and fold changes
- 
+2. **read**: Parse variants and frames from real data
+3. **simulate**: Generate simulated single-nucleotide variants from reading frames
+4. **run/run_supertype**: Generate peptides, predict binding, process output, calculate best ranks and fold changes
+5. **percentile**: Compare observed fold changes to the simulated distribution
 
 ## Output Files
 - `variants.csv`, `frames.csv`: Parsed input data
 - `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
 - `best_ranks.csv`, `harmonic_mean_best_ranks.csv`: Best ranks and fold change analysis
-- `percentile_harmonic_mean_best_ranks.csv`: Observed fold-change annotated with Percentile vs simulated background
-
-
-## Removed
-- The context-based pipeline under `src/context_run` was removed in favor of the simulation workflow.
- 
+- `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results
+- `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with percentile relative to simulated distribution
 
 ## Citation
 If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
