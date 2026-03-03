@@ -3,12 +3,30 @@
 process_best_ranks_supertype.jl
 
 Processes best ranks for peptides using a representative supertype HLA panel.
+Computes frequency-weighted harmonic mean best rank (HMBR) across panel alleles
+and the resulting log2 fold change (derived / ancestral) per variant.
 
 Usage:
-    julia process_best_ranks_supertype.jl <folder_path> [--suffix <name>] [--latest|--no-latest]
+    julia process_best_ranks_supertype.jl <folder_path> [--suffix <name>] [--latest|--no-latest] [--max-escape]
 
 Arguments:
     <folder_path>   Path to the folder containing processed peptides.
+
+Options:
+    --suffix <name>     Suffix appended to input/output filenames.
+    --latest            Use the most recently modified input file when ambiguous (default).
+    --no-latest         Error on ambiguous input files instead.
+    --max-escape        Identify the single panel allele with the largest predicted escape
+                        per variant. Adds two columns to harmonic_mean_best_ranks.csv:
+                          max_escape_allele   - the panel allele with the highest log2 fold
+                                               change (only alleles where ancestral EL rank
+                                               ≤ 2% are considered; missing if no allele
+                                               shows genuine escape).
+                          max_escape_log2_fc  - log2(EL_Rank_derived / EL_Rank_ancestral)
+                                               for that allele.
+                        WARNING: Supertype panel alleles are population-frequency surrogates,
+                        not an individual's genotype. The max-escape allele result may not
+                        be biologically meaningful in this context.
 """
 
 using DataFrames, CSV, Statistics, StatsBase
@@ -100,7 +118,7 @@ end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     if length(ARGS) < 1
-        println("Usage: julia process_best_ranks_supertype.jl <folder_path> [--suffix <name>] [--latest|--no-latest]")
+        println("Usage: julia process_best_ranks_supertype.jl <folder_path> [--suffix <name>] [--latest|--no-latest] [--max-escape]")
         exit(1)
     end
 
@@ -109,6 +127,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     function _parse_suffix_latest(argv::Vector{String})
         sfx = ""
         lat = true
+        me = false
         i = 1
         while i <= length(argv)
             a = argv[i]
@@ -121,12 +140,18 @@ if abspath(PROGRAM_FILE) == @__FILE__
                 lat = true
             elseif a == "--no-latest"
                 lat = false
+            elseif a in ["--max-escape", "--max-allele", "--max_allele"]
+                me = true
             end
             i += 1
         end
-        return sfx, lat
+        return sfx, lat, me
     end
-    suffix, latest = _parse_suffix_latest(ARGS[2:end])
+    suffix, latest, max_escape = _parse_suffix_latest(ARGS[2:end])
+
+    if max_escape
+        println("Warning: --max-escape is active on a supertype panel run. Supertype panel alleles are population-frequency surrogates, not an individual's genotype. The max_escape_allele result may not be biologically meaningful.")
+    end
 
     input_file = resolve_read(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix, latest=latest)
     println("Reading input file: $input_file")
@@ -167,15 +192,15 @@ function find_best_ranks(df, pattern)
     return best_rows
 end
 
-    println("Calculating best ranks for consensus peptides (_C)...")
-    best_C = find_best_ranks(df, "_C")
-    best_C.Peptide_Type .= "C"
-    println("Found best ranks for consensus peptides: $(nrow(best_C)) entries")
+    println("Calculating best ranks for ancestral peptides (_A)...")
+    best_C = find_best_ranks(df, "_A")
+    best_C.Peptide_Type .= "A"
+    println("Found best ranks for ancestral peptides: $(nrow(best_C)) entries")
 
-    println("Calculating best ranks for variant peptides (_V)...")
-    best_V = find_best_ranks(df, "_V")
-    best_V.Peptide_Type .= "V"
-    println("Found best ranks for variant peptides: $(nrow(best_V)) entries")
+    println("Calculating best ranks for derived peptides (_D)...")
+    best_V = find_best_ranks(df, "_D")
+    best_V.Peptide_Type .= "D"
+    println("Found best ranks for derived peptides: $(nrow(best_V)) entries")
 
 best_ranks = vcat(best_C, best_V)
 
@@ -355,9 +380,9 @@ if !isempty(best_ranks)
         (; HMBR = hmean_from_group(Float64.(sdf.Best_EL_Rank), sdf.MHC, wmap))
     end
 
-    # Pivot to separate C and V (HMBR only)
+    # Pivot to separate A and D (HMBR only)
     pivot_df = unstack(agg, :Peptide_Type, :HMBR)
-    rename!(pivot_df, Dict("C" => "HMBR_A", "V" => "HMBR_D"))
+    rename!(pivot_df, Dict("A" => "HMBR_A", "D" => "HMBR_D"))
 
     # Identify and report missing values before fold change calculation
     for row in eachrow(pivot_df)
@@ -379,9 +404,49 @@ if !isempty(best_ranks)
 
     # Fold change V/C
     pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
+    pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
+
+    # Compute max escape allele per (Locus, Mutation) if requested
+    if max_escape
+        best_A_me = filter(row -> row.Peptide_Type == "A", best_ranks)
+        best_D_me = filter(row -> row.Peptide_Type == "D", best_ranks)
+        if !isempty(best_A_me) && !isempty(best_D_me)
+            per_allele = innerjoin(
+                select(best_A_me, :Locus, :MHC, :Mutation, :Best_EL_Rank => :EL_Rank_A),
+                select(best_D_me, :Locus, :MHC, :Mutation, :Best_EL_Rank => :EL_Rank_D),
+                on = [:Locus, :MHC, :Mutation]
+            )
+            filter!(row -> row.EL_Rank_A <= 2.0, per_allele)
+            if !isempty(per_allele)
+                per_allele[!, :log2_fc] = log2.(per_allele.EL_Rank_D ./ per_allele.EL_Rank_A)
+                max_escape_alleles = combine(groupby(per_allele, [:Locus, :Mutation])) do sdf
+                    idx = argmax(sdf.log2_fc)
+                    best_fc = sdf.log2_fc[idx]
+                    if best_fc > 0
+                        (; max_escape_allele = String(sdf.MHC[idx]), max_escape_log2_fc = best_fc)
+                    else
+                        (; max_escape_allele = missing, max_escape_log2_fc = missing)
+                    end
+                end
+                pivot_df = leftjoin(pivot_df, max_escape_alleles, on = [:Locus, :Mutation])
+            else
+                println("Warning: No alleles with ancestral EL_Rank ≤ 2 found. max_escape columns will be missing.")
+                pivot_df[!, :max_escape_allele] = fill(missing, nrow(pivot_df))
+                pivot_df[!, :max_escape_log2_fc] = fill(missing, nrow(pivot_df))
+            end
+        else
+            pivot_df[!, :max_escape_allele] = fill(missing, nrow(pivot_df))
+            pivot_df[!, :max_escape_log2_fc] = fill(missing, nrow(pivot_df))
+        end
+    end
 
     # Reorder columns to requested schema
-    pivot_df = select(pivot_df, :Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR)
+    output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
+    if max_escape && "max_escape_allele" in names(pivot_df)
+        push!(output_cols, :max_escape_allele)
+        push!(output_cols, :max_escape_log2_fc)
+    end
+    pivot_df = select(pivot_df, output_cols...)
 
     # Save results
     harmonic_mean_file = resolve_write(joinpath(folder_path, "harmonic_mean_best_ranks.csv"); suffix=suffix)
