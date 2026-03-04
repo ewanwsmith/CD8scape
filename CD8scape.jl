@@ -5,8 +5,11 @@
 #
 # USAGE:
 #   ./CD8scape.jl prep
-#   ./CD8scape.jl read <folder_path>
-#   ./CD8scape.jl run  <folder_path>
+#   ./CD8scape.jl read        <folder_path> [--suffix <name>] [--latest|--no-latest]
+#   ./CD8scape.jl simulate    <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
+#   ./CD8scape.jl run         <folder_path> [--t <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
+#   ./CD8scape.jl run_supertype <folder_path> [--t <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
+#   ./CD8scape.jl percentile  <folder_path> [--s <sim_file>] [--o <obs_file>]
 #
 ###############################################################################
 
@@ -18,8 +21,8 @@ USAGE:
     ./CD8scape.jl prep
     ./CD8scape.jl read <folder_path> [--suffix <name>] [--latest|--no-latest]
     ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
-    ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
-    ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
+    ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
+    ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
     ./CD8scape.jl percentile <folder_path> [--s <sim_file>] [--o <obs_file>]
   
 
@@ -45,6 +48,16 @@ OPTIONS:
       file. --no-latest errors on ambiguity instead.
   --t <N|max>, --thread <N|max>
       Max number of chunks to execute in parallel when running NetMHCpan (default 1). Use 'max' to use the safety cap.
+  --max-escape
+      Identify the single allele from the panel with the largest predicted escape per
+      variant. Adds two columns to harmonic_mean_best_ranks.csv:
+        max_escape_allele   - the allele with the highest log2 fold change
+                              (only alleles where ancestral EL rank ≤ 2% are considered;
+                              missing if no allele shows genuine escape).
+        max_escape_log2_fc  - log2(EL_Rank_derived / EL_Rank_ancestral) for that allele.
+      Available for both run and run_supertype. Note: for run_supertype, the panel alleles
+      are population-frequency surrogates rather than an individual's genotype, so the
+      max_escape_allele result may not be biologically meaningful.
   --verbose
       Preserve per-allele logs and temp files for debugging.
 """)
@@ -212,6 +225,7 @@ elseif command == "run"
     extra_args = ARGS[3:end]
     suffix, latest = parse_suffix_latest(extra_args)
     verbose = any(a -> a == "--verbose", extra_args)
+    max_escape = any(a -> a in ["--max-escape", "--max-allele", "--max_allele"], extra_args)
     # Extract optional thread count and pass through
     threads_arg = String[]
     for (i, a) in enumerate(extra_args)
@@ -324,6 +338,7 @@ elseif command == "run"
     local ranks_cmd = `julia --project=. src/process_best_ranks.jl $folder_path`
     if suffix != ""; ranks_cmd = `$ranks_cmd --suffix $suffix`; end
     if latest; ranks_cmd = `$ranks_cmd --latest`; else ranks_cmd = `$ranks_cmd --no-latest`; end
+    if max_escape; ranks_cmd = `$ranks_cmd --max-escape`; end
     if !safe_run(ranks_cmd)
         println("Error running src/process_best_ranks.jl")
         exit(1)
@@ -342,6 +357,10 @@ elseif command == "run_supertype"
     extra_args = ARGS[3:end]
     suffix, latest = parse_suffix_latest(extra_args)
     verbose = any(a -> a == "--verbose", extra_args)
+    max_escape = any(a -> a in ["--max-escape", "--max-allele", "--max_allele"], extra_args)
+    if max_escape
+        println("Warning: --max-escape is active on a supertype panel run. Supertype panel alleles are population-frequency surrogates, not an individual's genotype. The max_escape_allele result may not be biologically meaningful.")
+    end
     # Extract optional thread count and pass through
     threads_arg = String[]
     for (i, a) in enumerate(extra_args)
@@ -453,6 +472,7 @@ elseif command == "run_supertype"
     local ranks_cmd = `julia --project=. src/process_best_ranks.jl $folder_path`
     if suffix != ""; ranks_cmd = `$ranks_cmd --suffix $suffix`; end
     if latest; ranks_cmd = `$ranks_cmd --latest`; else ranks_cmd = `$ranks_cmd --no-latest`; end
+    if max_escape; ranks_cmd = `$ranks_cmd --max-escape`; end
     if !safe_run(ranks_cmd)
         println("Error running src/process_best_ranks.jl")
         exit(1)

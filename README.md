@@ -7,6 +7,7 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 - MHC binding prediction using netMHCpan
 - Robust output parsing and best-rank calculation
 - Harmonic mean best rank (HMBR) and fold change analysis
+- Max escape allele identification per variant (with biological caveat for supertype panel mode)
 - Simulated variant generation for percentile benchmarking
 
 ## Requirements
@@ -114,17 +115,21 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
-./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
+./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
 - `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use the safety cap.
 - `--verbose`: preserve per-allele logs and temp files for debugging.
+- `--max-escape`: compute the single allele from the panel showing the largest predicted escape for each variant. Adds two columns to `harmonic_mean_best_ranks.csv`:
+  - `max_escape_allele`: the HLA allele with the highest log2 fold change (ancestral EL rank ≤ 2% required; `missing` if no allele shows genuine escape).
+  - `max_escape_log2_fc`: the corresponding log2(EL_Rank_derived / EL_Rank_ancestral) for that allele.
 
 ### 5. Run Pipeline (Supertype Panel)
 ```bash
-./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--verbose] [--suffix <name>] [--latest|--no-latest]
+./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - As above, but uses a representative supertype HLA panel.
+- `--max-escape` is available but interpret results with caution: panel alleles are population-frequency surrogates rather than an individual's genotype, so the `max_escape_allele` result may not be biologically meaningful. A warning is printed when this flag is used with `run_supertype`.
 
 ### 6. Compute Percentiles (Benchmarking)
 ```bash
@@ -156,7 +161,8 @@ These options allow multiple independent analyses (e.g. observed vs. simulated) 
 - `variants.csv`, `frames.csv`: Parsed input data
 - `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
-- `best_ranks.csv`, `harmonic_mean_best_ranks.csv`: Best ranks and fold change analysis
+- `best_ranks.csv`: Per-allele best EL ranks for ancestral and derived peptides at each locus.
+- `harmonic_mean_best_ranks.csv`: Harmonic mean best ranks (HMBR) and log2 fold changes across the panel. With `--max-escape`, also includes `max_escape_allele` and `max_escape_log2_fc`.
 - `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results
 - `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with percentile relative to simulated distribution
 
