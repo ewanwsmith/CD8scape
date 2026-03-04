@@ -5,7 +5,7 @@
 #
 # USAGE:
 #   ./CD8scape.jl prep
-#   ./CD8scape.jl read        <folder_path> [--suffix <name>] [--latest|--no-latest]
+#   ./CD8scape.jl read        <folder_path> [--aa] [--suffix <name>] [--latest|--no-latest]
 #   ./CD8scape.jl simulate    <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
 #   ./CD8scape.jl run         <folder_path> [--t <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
 #   ./CD8scape.jl run_supertype <folder_path> [--t <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
@@ -19,7 +19,7 @@ CD8scape.jl - A tool for running netMHCpan and managing related data.
 
 USAGE:
     ./CD8scape.jl prep
-    ./CD8scape.jl read <folder_path> [--suffix <name>] [--latest|--no-latest]
+    ./CD8scape.jl read <folder_path> [--aa] [--suffix <name>] [--latest|--no-latest]
     ./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
     ./CD8scape.jl run  <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
     ./CD8scape.jl run_supertype  <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
@@ -28,7 +28,7 @@ USAGE:
 
 COMMANDS:
     prep         Set up the environment by running src/env.jl.
-    read         Parse variants input (Samfire trajectories or .vcf) and read frames (SamFire or NCBI).
+    read         Parse variants input (Samfire trajectories, .vcf, or .aa amino-acid variants) and read frames (SamFire or NCBI).
     simulate     Read frames, then generate and optionally sample simulated variants per frame.
     run          Run the peptide-generation and NetMHCpan pipeline on parsed data.
     run_supertype Run the peptide-generation and NetMHCpan pipeline on parsed data for a representative supertype HLA panel.
@@ -38,6 +38,12 @@ COMMANDS:
 OPTIONS:
   --help, -h
       Print this help message and exit.
+  --aa
+      Parse amino-acid-level variants from a .aa file instead of VCF or trajectories.
+      The .aa file format is two lines per variant:
+        <orf_name> <aa_position>
+        <ancestral_aa> <derived_aa>
+      The orf_name must match a Description in frames.csv; aa_position is 1-based.
   --suffix <name>
       Append _<name> before the file extension of all output files (e.g. --suffix foo
       produces variants_foo.csv, best_ranks_foo.csv, etc.). For 'simulate', defaults to
@@ -88,6 +94,7 @@ include("src/path_utils.jl")
 function parse_suffix_latest(argv::Vector{String})
     suffix = ""
     latest = true
+    use_aa = false
     i = 1
     while i <= length(argv)
         a = argv[i]
@@ -100,10 +107,12 @@ function parse_suffix_latest(argv::Vector{String})
             latest = true
         elseif a == "--no-latest"
             latest = false
+        elseif a == "--aa"
+            use_aa = true
         end
         i += 1
     end
-    return suffix, latest
+    return suffix, latest, use_aa
 end
 
 # Process "prep" command
@@ -123,7 +132,7 @@ elseif command == "read"
     end
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
-    suffix, latest = parse_suffix_latest(extra_args)
+    suffix, latest, use_aa = parse_suffix_latest(extra_args)
     # Expected output path for frames (do not require existence before running readers)
     frames_csv_path = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
     variants_csv_path = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
@@ -145,24 +154,36 @@ elseif command == "read"
         end
     end
 
-    # Parse variants: prefer VCF if present, otherwise trajectories
-    vcf_files = filter(f -> endswith(f, ".vcf") || endswith(f, ".vcf.gz"), readdir(folder_path; join=true))
+    # Parse variants
     parse_ok = false
-    if !isempty(vcf_files)
+    if use_aa
+        # --aa flag: parse amino-acid-level variants from a .aa file
+        local parse_aa_cmd = `julia --project=. src/parse_aa_variants.jl $folder_path`
+        if suffix != ""; parse_aa_cmd = `$parse_aa_cmd --suffix $suffix`; end
+        if latest; parse_aa_cmd = `$parse_aa_cmd --latest`; else parse_aa_cmd = `$parse_aa_cmd --no-latest`; end
+        parse_ok = safe_run(parse_aa_cmd)
+        if !parse_ok
+            println("Error: parse_aa_variants.jl failed.")
+        end
+    else
+        # Prefer VCF if present, otherwise trajectories
+        vcf_files = filter(f -> endswith(f, ".vcf") || endswith(f, ".vcf.gz"), readdir(folder_path; join=true))
+        if !isempty(vcf_files)
             local parse_vcf_cmd = `julia --project=. src/parse_vcf.jl $folder_path`
             if suffix != ""; parse_vcf_cmd = `$parse_vcf_cmd --suffix $suffix`; end
             parse_ok = safe_run(parse_vcf_cmd)
-        if !parse_ok
-            println("parse_vcf.jl failed; trying parse_trajectories.jl.")
+            if !parse_ok
+                println("parse_vcf.jl failed; trying parse_trajectories.jl.")
+            end
         end
-    end
-    if !parse_ok
+        if !parse_ok
             local parse_traj_cmd = `julia --project=. src/parse_trajectories.jl $folder_path`
             if suffix != ""; parse_traj_cmd = `$parse_traj_cmd --suffix $suffix`; end
             parse_ok = safe_run(parse_traj_cmd)
+        end
     end
     if !parse_ok || !isfile(variants_csv_path)
-        println("Error: Failed to parse variants from VCF or trajectories.")
+        println("Error: Failed to parse variants.")
         exit(1)
     end
 
@@ -177,7 +198,7 @@ elseif command == "simulate"
 
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
-    suffix, latest = parse_suffix_latest(extra_args)
+    suffix, latest, _ = parse_suffix_latest(extra_args)
     # If no suffix provided, default to 'simulated' so frames/variants share it
     if isempty(suffix)
         suffix = "simulated"
@@ -223,7 +244,7 @@ elseif command == "run"
 
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
-    suffix, latest = parse_suffix_latest(extra_args)
+    suffix, latest, _ = parse_suffix_latest(extra_args)
     verbose = any(a -> a == "--verbose", extra_args)
     max_escape = any(a -> a in ["--max-escape", "--max-allele", "--max_allele"], extra_args)
     # Extract optional thread count and pass through
@@ -355,7 +376,7 @@ elseif command == "run_supertype"
 
     folder_path = ARGS[2]
     extra_args = ARGS[3:end]
-    suffix, latest = parse_suffix_latest(extra_args)
+    suffix, latest, _ = parse_suffix_latest(extra_args)
     verbose = any(a -> a == "--verbose", extra_args)
     max_escape = any(a -> a in ["--max-escape", "--max-allele", "--max_allele"], extra_args)
     if max_escape
