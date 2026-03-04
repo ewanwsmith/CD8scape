@@ -41,11 +41,38 @@ CD8scape expects a data folder containing the following files:
 - **Variant file** (one of the following):
   - `.vcf` or `.vcf.gz` file (standard variant call format).
   - `single_locus_trajectories.out` from [Samfire](https://github.com/cjri/samfire) (also matches any `single_locus_trajectories*.out`, or falls back to any `.out` file in the folder).
+  - A `.aa` amino-acid variant file — used when `read` is run with `--aa` (see below).
 - **Reading frame file** (one of the following):
   - `sequences.fasta` **and** `consensus.fa` for the NCBI path: `sequences.fasta` provides ORF definitions with coordinate headers (e.g. from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)), and `consensus.fa` provides the full reference genome from which reading frame subsequences are extracted.
   - `Reading_Frames.dat` from [Samfire](https://github.com/cjri/samfire).
 
-CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. VCF files are tried first; if no VCF is found or parsing fails, Samfire trajectory parsing is attempted. For reading frames, the NCBI path (`sequences.fasta` + `consensus.fa`) is tried first, falling back to Samfire's `Reading_Frames.dat`.
+CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. VCF files are tried first; if no VCF is found or parsing fails, Samfire trajectory parsing is attempted. When `--aa` is passed to `read`, amino-acid variants are read instead. For reading frames, the NCBI path (`sequences.fasta` + `consensus.fa`) is tried first, falling back to Samfire's `Reading_Frames.dat`.
+
+### Amino-acid variant file format (`.aa`)
+
+The `.aa` format specifies variants directly at the amino-acid level — for example, to replicate substitutions reported in the literature without underlying sequence data. Pass `--aa` to the `read` command to use this format.
+
+Each variant is two lines:
+```
+<orf_name> <aa_position>
+<ancestral_aa> <derived_aa>
+```
+
+- `orf_name` must exactly match a `Description` value in `frames.csv` (set by the reading frame file).
+- `aa_position` is 1-based within the translated protein.
+- `ancestral_aa` and `derived_aa` are single-letter amino acid codes.
+- Blank lines between records are ignored.
+
+**Example:**
+```
+Orf3 23
+K M
+
+Orf1 45
+A T
+```
+
+Canonical codons are always used for both ancestral and derived amino acids, regardless of the actual consensus sequence. This means substitutions can be forced even when the consensus at that position does not encode the specified ancestral amino acid (e.g. when replicating published results without access to the original sequence data). A warning is printed and the frames file is updated in place whenever a consensus mismatch is overridden.
 
 ### Example: alleles.txt
 ```
@@ -85,6 +112,15 @@ Samfire-only input:
     Reading_Frames.dat
 ```
 
+Amino-acid variant input (use `read --aa`):
+```
+<your_data_folder>/
+    alleles.txt
+    variants.aa                     # amino-acid variant file
+    sequences.fasta                 # NCBI ORF definitions (or Reading_Frames.dat)
+    consensus.fa                    # full reference genome
+```
+
 For Samfire, see [Samfire GitHub](https://github.com/cjri/samfire) for details on generating `.out` and `.dat` files.
 
 ## Usage
@@ -98,9 +134,10 @@ Note: `prep` performs all dependency installation and environment setup. The oth
 
 ### 2. Parse Input Data
 ```bash
-./CD8scape.jl read <folder_path> [--suffix <name>] [--latest|--no-latest]
+./CD8scape.jl read <folder_path> [--aa] [--suffix <name>] [--latest|--no-latest]
 ```
 Parses variants and reading frames from the data folder, producing `variants.csv` and `frames.csv`.
+- `--aa`: read amino-acid variants from a `.aa` file instead of VCF or Samfire trajectories (see [Amino-acid variant file format](#amino-acid-variant-file-format-aa) above).
 
 ### 3. Simulate Input Data
 ```bash
