@@ -1,2 +1,4 @@
-# Set the path to your netMHCpan executable below
+# Set the path to your netMHCpan executable below (4.1 and 4.2 are both supported)
+# Example for 4.1: NETMHCPAN=/full/path/to/netMHCpan-4.1/netMHCpan
+# Example for 4.2: NETMHCPAN=/full/path/to/netMHCpan-4.2/netMHCpan
 NETMHCPAN=/full/path/to/netMHCpan
