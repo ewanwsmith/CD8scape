@@ -53,6 +53,11 @@ die "Not enough columns in the header line for $num_haplotypes haplotype(s) usin
 # Extract per-haplotype column names from the header (use the first block)
 my @per_haplotype_cols = @header_cols[$haplotype_start .. ($haplotype_start + $cols_per_haplotype - 1)];
 
+# Normalize column names for version compatibility:
+# netMHCpan 4.2 uses 'Score'/'Rank'; 4.1 uses 'EL-score'/'EL_Rank'
+my %col_remap = ('Score' => 'EL-score', 'Rank' => 'EL_Rank');
+@per_haplotype_cols = map { exists $col_remap{$_} ? $col_remap{$_} : $_ } @per_haplotype_cols;
+
 # Construct new header using the actual per-haplotype column names
 my @final_header = ('Pos', 'Peptide', 'ID', 'HLA', @per_haplotype_cols);
 print join(",", @final_header), "\n";
