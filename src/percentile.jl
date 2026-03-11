@@ -15,6 +15,14 @@ Defaults:
 Output:
 - Writes percentile_harmonic_mean_best_ranks(_suffix).csv in <folder_path>, adding a
   Percentile column (0-100) to the observed rows.
+
+
+With --per-allele:
+- Simulation file defaults to per_allele_best_ranks_simulated.csv in <folder_path>.
+- Observed file defaults to the most recent per_allele_best_ranks*.csv in <folder_path>
+  whose suffix is not exactly _simulated.
+- Computes percentiles of log2_foldchange_BR per (Locus, Mutation, MHC).
+- Output: percentile_per_allele_best_ranks(_suffix).csv
 """
 
 using CSV, DataFrames, StatsBase
@@ -27,18 +35,15 @@ function _resolve_path(folder::AbstractString, p::AbstractString)
     return isabspath(p) ? String(p) : joinpath(folder, p)
 end
 
-# Utility: discover latest observed file (excluding suffix == "simulated")
-function _discover_observed(folder::AbstractString)::String
+# Utility: discover latest observed file matching base_name (excluding suffix == "simulated")
+function _discover_observed(folder::AbstractString, base_name::AbstractString)::String
     files = readdir(folder; join=true)
-    # match harmonic_mean_best_ranks*.csv and exclude *_simulated.csv
     candidates = String[]
     for f in files
         base = basename(f)
-        if endswith(base, ".csv") && startswith(base, "harmonic_mean_best_ranks")
+        if endswith(base, ".csv") && startswith(base, base_name)
             name, ext = splitext(base)
-            # Suffix portion after the base name
-            suffix_part = replace(name, "harmonic_mean_best_ranks" => "")
-            # Exclude exactly _simulated
+            suffix_part = replace(name, base_name => "")
             if lowercase(suffix_part) == "_simulated"
                 continue
             end
@@ -46,23 +51,21 @@ function _discover_observed(folder::AbstractString)::String
         end
     end
     if isempty(candidates)
-        error("No observed harmonic_mean_best_ranks*.csv found in $(folder) (excluding _simulated).")
+        error("No observed $(base_name)*.csv found in $(folder) (excluding _simulated).")
     end
-    # Choose latest by modification time
     mtimes = map(p -> stat(p).mtime, candidates)
     idx = argmax(mtimes)
     return candidates[idx]
 end
 
 # Utility: extract suffix from observed filename for output naming
-function _suffix_from_observed(obspath::AbstractString)::String
+function _suffix_from_observed(obspath::AbstractString, base_name::AbstractString)::String
     base = basename(obspath)
     name, ext = splitext(base)
-    suffix_part = replace(name, "harmonic_mean_best_ranks" => "")
+    suffix_part = replace(name, base_name => "")
     if isempty(suffix_part)
         return ""
     end
-    # Drop leading underscore
     if startswith(suffix_part, "_")
         suffix_part = suffix_part[2:end]
     end
@@ -114,15 +117,27 @@ if abspath(PROGRAM_FILE) == @__FILE__
         return s, o
     end
     sim_file_cli, obs_file_cli = _parse_s_o(ARGS[2:end])
+    per_allele = any(a -> a == "--per-allele", ARGS[2:end])
+
+    # Choose base names and fold-change column based on mode
+    if per_allele
+        base_name    = "per_allele_best_ranks"
+        fc_col       = :log2_foldchange_BR
+        out_prefix   = "percentile_per_allele_best_ranks"
+    else
+        base_name    = "harmonic_mean_best_ranks"
+        fc_col       = :log2_foldchange_HMBR
+        out_prefix   = "percentile_harmonic_mean_best_ranks"
+    end
 
     # Resolve simulation path
-    sim_path = isempty(sim_file_cli) ? joinpath(folder_path, "harmonic_mean_best_ranks_simulated.csv") : _resolve_path(folder_path, sim_file_cli)
+    sim_path = isempty(sim_file_cli) ? joinpath(folder_path, base_name * "_simulated.csv") : _resolve_path(folder_path, sim_file_cli)
     if !isfile(sim_path)
         error("Simulation file not found: " * sim_path)
     end
 
     # Resolve observed path (discover latest if not provided)
-    obs_path = isempty(obs_file_cli) ? _discover_observed(folder_path) : _resolve_path(folder_path, obs_file_cli)
+    obs_path = isempty(obs_file_cli) ? _discover_observed(folder_path, base_name) : _resolve_path(folder_path, obs_file_cli)
     if !isfile(obs_path)
         error("Observed file not found: " * obs_path)
     end
@@ -133,54 +148,33 @@ if abspath(PROGRAM_FILE) == @__FILE__
     sim_df = CSV.read(sim_path, DataFrame)
     obs_df = CSV.read(obs_path, DataFrame)
 
-    # Ensure log2_foldchange_HMBR exists; compute from HMBR_D/HMBR_A if needed
+    # Ensure the fold-change column exists; for HMBR mode, recompute from A/D if missing
     hascol(df, sym) = hasproperty(df, sym)
-    function ensure_log2!(df::DataFrame)
-        if hascol(df, :log2_foldchange_HMBR)
+    function ensure_log2!(df::DataFrame, col::Symbol)
+        if hascol(df, col)
             return
         end
-        if hascol(df, :HMBR_A) && hascol(df, :HMBR_D)
-            # Try to coerce to Float64
+        if col == :log2_foldchange_HMBR && hascol(df, :HMBR_A) && hascol(df, :HMBR_D)
             a = Vector{Union{Missing,Float64}}(undef, nrow(df))
             d = Vector{Union{Missing,Float64}}(undef, nrow(df))
             for (i, row) in enumerate(eachrow(df))
-                ai = row[:HMBR_A]
-                di = row[:HMBR_D]
-                try
-                    a[i] = ai === missing ? missing : Float64(ai)
-                catch
-                    a[i] = missing
-                end
-                try
-                    d[i] = di === missing ? missing : Float64(di)
-                catch
-                    d[i] = missing
-                end
+                ai = row[:HMBR_A]; di = row[:HMBR_D]
+                try; a[i] = ai === missing ? missing : Float64(ai); catch; a[i] = missing; end
+                try; d[i] = di === missing ? missing : Float64(di); catch; d[i] = missing; end
             end
-            fold = Vector{Union{Missing,Float64}}(undef, nrow(df))
-            for i in 1:nrow(df)
-                if a[i] === missing || d[i] === missing || a[i] == 0
-                    fold[i] = missing
-                else
-                    fold[i] = d[i] / a[i]
-                end
-            end
-            log2fc = Vector{Union{Missing,Float64}}(undef, nrow(df))
-            for i in 1:nrow(df)
-                if fold[i] === missing
-                    log2fc[i] = missing
-                else
-                    log2fc[i] = log2(fold[i])
-                end
-            end
-            df[!, :log2_foldchange_HMBR] = log2fc
+            fold = [a[i] === missing || d[i] === missing || a[i] == 0 ? missing : d[i] / a[i] for i in 1:nrow(df)]
+            df[!, :log2_foldchange_HMBR] = [f === missing ? missing : log2(f) for f in fold]
+        elseif col == :log2_foldchange_BR && hascol(df, :ELBR_A) && hascol(df, :ELBR_D)
+            fold = [a === missing || d === missing || a == 0 ? missing : d / a
+                    for (a, d) in zip(df[!, :ELBR_A], df[!, :ELBR_D])]
+            df[!, :log2_foldchange_BR] = [f === missing ? missing : log2(f) for f in fold]
         else
-            error("File missing 'log2_foldchange_HMBR' and cannot compute from HMBR_A/HMBR_D.")
+            error("File missing '$(col)' and cannot recompute it from available columns.")
         end
     end
 
-    ensure_log2!(sim_df)
-    ensure_log2!(obs_df)
+    ensure_log2!(sim_df, fc_col)
+    ensure_log2!(obs_df, fc_col)
 
     # Overlap removal: drop simulated entries that match observed variants
     # Build keys on shared identifier columns
@@ -219,15 +213,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # Build simulated distribution from available numeric values
     sim_vals = Vector{Float64}()
-    for v in sim_df_filtered[!, :log2_foldchange_HMBR]
-        if v isa Missing
-            continue
-        end
-        try
-            push!(sim_vals, Float64(v))
-        catch
-            # skip non-parsable
-        end
+    for v in sim_df_filtered[!, fc_col]
+        if v isa Missing; continue; end
+        try; push!(sim_vals, Float64(v)); catch; end
     end
 
     if isempty(sim_vals)
@@ -235,25 +223,20 @@ if abspath(PROGRAM_FILE) == @__FILE__
         obs_df[!, :Percentile] = [missing for _ in 1:nrow(obs_df)]
     else
         F = ecdf(sim_vals)
-        # Percentile as proportion <= x times 100
         perc = Float64[]
-        for v in obs_df[!, :log2_foldchange_HMBR]
+        for v in obs_df[!, fc_col]
             if v isa Missing
                 push!(perc, NaN)
             else
-                try
-                    push!(perc, 100.0 * F(Float64(v)))
-                catch
-                    push!(perc, NaN)
-                end
+                try; push!(perc, 100.0 * F(Float64(v))); catch; push!(perc, NaN); end
             end
         end
         obs_df[!, :Percentile] = perc
     end
 
     # Write output next to observed, carrying through observed suffix
-    out_suffix = _suffix_from_observed(obs_path)
-    out_name = isempty(out_suffix) ? "percentile_harmonic_mean_best_ranks.csv" : string("percentile_harmonic_mean_best_ranks_", out_suffix, ".csv")
+    out_suffix = _suffix_from_observed(obs_path, base_name)
+    out_name = isempty(out_suffix) ? string(out_prefix, ".csv") : string(out_prefix, "_", out_suffix, ".csv")
     out_path = joinpath(folder_path, out_name)
     CSV.write(out_path, obs_df)
     println("Wrote percentiles to " * out_path)

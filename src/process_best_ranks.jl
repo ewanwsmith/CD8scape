@@ -7,7 +7,7 @@ Computes harmonic mean best rank (HMBR) across all panel alleles and the
 resulting log2 fold change (derived / ancestral) per variant.
 
 Usage:
-    julia process_best_ranks.jl <folder_path> [--suffix <name>] [--latest|--no-latest] [--max-escape]
+    julia process_best_ranks.jl <folder_path> [--suffix <name>] [--latest|--no-latest] [--per-allele]
 
 Arguments:
     <folder_path>   Path to the folder containing processed_peptides.csv.
@@ -16,13 +16,16 @@ Options:
     --suffix <name>     Suffix appended to input/output filenames.
     --latest            Use the most recently modified input file when ambiguous (default).
     --no-latest         Error on ambiguous input files instead.
-    --max-escape        Also identify the single panel allele with the largest predicted
-                        escape per variant. Adds two columns to harmonic_mean_best_ranks.csv:
-                          max_escape_allele   - the HLA allele with the highest log2 fold change
-                                                (only alleles where ancestral EL rank ≤ 2% are
-                                                considered; missing if no allele shows genuine escape)
-                          max_escape_log2_fc  - log2(EL_Rank_derived / EL_Rank_ancestral) for
-                                                that allele
+    --per-allele        Perform the log2 fold change calculation per allele in the provided
+                        genome, writing a separate per_allele_best_ranks.csv file containing one
+                        row per (Locus, Mutation, allele) with columns:
+                          Frame              - protein / region label
+                          MHC                - the allele identifier
+                          ELBR_A            - best ancestral EL rank for that allele
+                          ELBR_D            - best derived EL rank for that allele
+                          foldchange_BR      - EL_Rank_D / EL_Rank_A
+                          log2_foldchange_BR - log2(foldchange_BR)
+                        Only alleles where ancestral EL rank ≤ 2% are included.
 """
 
 using DataFrames, CSV, Statistics, StatsBase
@@ -53,14 +56,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
                 lat = true
             elseif a == "--no-latest"
                 lat = false
-            elseif a in ["--max-escape", "--max-allele", "--max_allele"]
+            elseif a == "--per-allele"
                 me = true
             end
             i += 1
         end
         return sfx, lat, me
     end
-    suffix, latest, max_escape = _parse_suffix_latest(ARGS[2:end])
+    suffix, latest, per_allele = _parse_suffix_latest(ARGS[2:end])
 
     input_file = resolve_read(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix, latest=latest)
     println("Reading input file: $input_file")
@@ -290,47 +293,34 @@ end
         pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
     end
 
-    # Compute max escape allele per (Locus, Mutation) if requested
-    if max_escape
-        best_A_me = filter(row -> row.Peptide_Type == "A", best_ranks)
-        best_D_me = filter(row -> row.Peptide_Type == "D", best_ranks)
-        if !isempty(best_A_me) && !isempty(best_D_me)
-            per_allele = innerjoin(
-                select(best_A_me, :Locus, :MHC, :Mutation, :Best_EL_Rank => :EL_Rank_A),
-                select(best_D_me, :Locus, :MHC, :Mutation, :Best_EL_Rank => :EL_Rank_D),
+    # Compute per-allele log2 fold change if requested
+    if per_allele
+        best_A_pa = filter(row -> row.Peptide_Type == "A", best_ranks)
+        best_D_pa = filter(row -> row.Peptide_Type == "D", best_ranks)
+        if !isempty(best_A_pa) && !isempty(best_D_pa)
+            per_allele_df = innerjoin(
+                select(best_A_pa, :Frame, :Locus, :MHC, :Mutation, :Best_EL_Rank => :ELBR_A),
+                select(best_D_pa, :Locus, :MHC, :Mutation, :Best_EL_Rank => :ELBR_D),
                 on = [:Locus, :MHC, :Mutation]
             )
-            filter!(row -> row.EL_Rank_A <= 2.0, per_allele)
-            if !isempty(per_allele)
-                per_allele[!, :log2_fc] = log2.(per_allele.EL_Rank_D ./ per_allele.EL_Rank_A)
-                max_escape_alleles = combine(groupby(per_allele, [:Locus, :Mutation])) do sdf
-                    idx = argmax(sdf.log2_fc)
-                    best_fc = sdf.log2_fc[idx]
-                    # Only report if there is genuine escape (positive log2FC)
-                    if best_fc > 0
-                        (; max_escape_allele = String(sdf.MHC[idx]), max_escape_log2_fc = best_fc)
-                    else
-                        (; max_escape_allele = missing, max_escape_log2_fc = missing)
-                    end
-                end
-                pivot_df = leftjoin(pivot_df, max_escape_alleles, on = [:Locus, :Mutation])
+            filter!(row -> row.ELBR_A <= 2.0, per_allele_df)
+            if !isempty(per_allele_df)
+                per_allele_df[!, :foldchange_BR] = per_allele_df.ELBR_D ./ per_allele_df.ELBR_A
+                per_allele_df[!, :log2_foldchange_BR] = log2.(per_allele_df.foldchange_BR)
+                select!(per_allele_df, :Frame, :Locus, :Mutation, :MHC, :ELBR_A, :ELBR_D, :foldchange_BR, :log2_foldchange_BR)
+                per_allele_file = resolve_write(joinpath(folder_path, "per_allele_best_ranks.csv"); suffix=suffix)
+                CSV.write(per_allele_file, per_allele_df)
+                println("Saved per-allele escape log2 fold changes to $per_allele_file")
             else
-                println("Warning: No alleles with ancestral EL_Rank ≤ 2 found. max_escape columns will be missing.")
-                pivot_df[!, :max_escape_allele] = fill(missing, nrow(pivot_df))
-                pivot_df[!, :max_escape_log2_fc] = fill(missing, nrow(pivot_df))
+                println("Warning: No alleles with ancestral EL_Rank ≤ 2 found. per_allele_best_ranks.csv will not be written.")
             end
         else
-            pivot_df[!, :max_escape_allele] = fill(missing, nrow(pivot_df))
-            pivot_df[!, :max_escape_log2_fc] = fill(missing, nrow(pivot_df))
+            println("Warning: Missing ancestral or derived peptide data. per_allele_best_ranks.csv will not be written.")
         end
     end
 
     # Prepare final output columns (use already computed values)
     output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
-    if max_escape && "max_escape_allele" in names(pivot_df)
-        push!(output_cols, :max_escape_allele)
-        push!(output_cols, :max_escape_log2_fc)
-    end
     pivot_df = select(pivot_df, output_cols...)
 
     # Save harmonic mean results with fold change
