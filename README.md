@@ -6,8 +6,8 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 - Automated peptide generation for consensus and variant loci
 - MHC binding prediction using netMHCpan
 - Robust output parsing and best-rank calculation
-- Harmonic mean best rank (HMBR) and fold change analysis
-- Max escape allele identification per variant (with biological caveat for supertype panel mode)
+- Harmonic mean best rank (HMBR) and fold change analysis across the full allele panel
+- Per-allele log2 fold change output for every allele in the genome (`--per-allele`)
 - Simulated variant generation for percentile benchmarking
 
 ## Requirements
@@ -152,31 +152,31 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 
 ### 4. Run Pipeline (Individual Genotype)
 ```bash
-./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
+./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--per-allele] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
 - `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use the safety cap.
 - `--verbose`: preserve per-allele logs and temp files for debugging.
-- `--max-escape`: compute the single allele from the panel showing the largest predicted escape for each variant. Adds two columns to `harmonic_mean_best_ranks.csv`:
-  - `max_escape_allele`: the HLA allele with the highest log2 fold change (ancestral EL rank ≤ 2% required; `missing` if no allele shows genuine escape).
-  - `max_escape_log2_fc`: the corresponding log2(EL_Rank_derived / EL_Rank_ancestral) for that allele.
+- `--per-allele`: compute log2 fold change for every allele in the genome individually. Only alleles where the ancestral EL rank is ≤ 2% are included. Writes a separate `per_allele_best_ranks.csv` with columns `Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, and `log2_foldchange_BR`.
 
 ### 5. Run Pipeline (Supertype Panel)
 ```bash
-./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--max-escape] [--verbose] [--suffix <name>] [--latest|--no-latest]
+./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--per-allele] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - As above, but uses a representative supertype HLA panel.
-- `--max-escape` is available but interpret results with caution: panel alleles are population-frequency surrogates rather than an individual's genotype, so the `max_escape_allele` result may not be biologically meaningful. A warning is printed when this flag is used with `run_supertype`.
+- `--per-allele` is available but note that panel alleles are population-frequency surrogates rather than an individual's genotype, so per-allele results reflect population-level coverage rather than personal immunogenicity.
 
 ### 6. Compute Percentiles (Benchmarking)
 ```bash
-./CD8scape.jl percentile <folder_path> [--s <sim_file>] [--o <obs_file>]
+./CD8scape.jl percentile <folder_path> [--per-allele] [--s <sim_file>] [--o <obs_file>]
 ```
-- Computes observed HMBR log2 fold-change percentiles relative to a simulated distribution.
-- `--s <sim_file>`: path to the simulated HMBR file (defaults to `harmonic_mean_best_ranks_simulated.csv` in the data folder).
-- `--o <obs_file>`: path to the observed HMBR file (defaults to the most recent `harmonic_mean_best_ranks*.csv` in the data folder, excluding `_simulated`).
+- Computes observed log2 fold-change percentiles relative to a simulated distribution.
+- By default operates on HMBR fold changes (`harmonic_mean_best_ranks.csv`).
+- `--per-allele`: operate on per-allele fold changes instead (`per_allele_best_ranks.csv`). Percentiles are computed per allele rather than per variant.
+- `--s <sim_file>`: path to the simulated file (defaults to `harmonic_mean_best_ranks_simulated.csv` or `per_allele_best_ranks_simulated.csv` depending on mode).
+- `--o <obs_file>`: path to the observed file (defaults to the most recent matching file in the data folder, excluding `_simulated`).
 - Observed variants are excluded from the simulated distribution before computing percentiles.
-- Writes `percentile_harmonic_mean_best_ranks.csv` (with a `Percentile` column, 0–100) to the data folder.
+- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv` (with a `Percentile` column, 0–100) to the data folder.
 
 ### Global Options
 
@@ -191,17 +191,20 @@ These options allow multiple independent analyses (e.g. observed vs. simulated) 
 1. **prep**: Install dependencies
 2. **read**: Parse variants and frames from real data
 3. **simulate**: Generate simulated single-nucleotide variants from reading frames
-4. **run/run_supertype**: Generate peptides, predict binding, process output, calculate best ranks and fold changes
-5. **percentile**: Compare observed fold changes to the simulated distribution
+4. **run/run_supertype**: Generate peptides, predict binding, process output, calculate best ranks and fold changes. Add `--per-allele` to also produce per-allele fold changes.
+5. **percentile**: Compare observed fold changes to the simulated distribution. Add `--per-allele` to benchmark per-allele fold changes instead of HMBR.
 
 ## Output Files
 - `variants.csv`, `frames.csv`: Parsed input data
 - `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
 - `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
 - `best_ranks.csv`: Per-allele best EL ranks for ancestral and derived peptides at each locus.
-- `harmonic_mean_best_ranks.csv`: Harmonic mean best ranks (HMBR) and log2 fold changes across the panel. With `--max-escape`, also includes `max_escape_allele` and `max_escape_log2_fc`.
-- `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results
-- `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with percentile relative to simulated distribution
+- `harmonic_mean_best_ranks.csv`: Harmonic mean best ranks (HMBR) and log2 fold changes aggregated across the panel (`Frame`, `Locus`, `Mutation`, `HMBR_A`, `HMBR_D`, `foldchange_HMBR`, `log2_foldchange_HMBR`).
+- `per_allele_best_ranks.csv`: Per-allele eluted ligand best ranks and log2 fold changes for every allele in the genome, filtered to ancestral EL rank ≤ 2% (`Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`). Written when `--per-allele` is passed to `run` or `run_supertype`.
+- `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results (produced by `simulate` + `run`).
+- `per_allele_best_ranks_simulated.csv`: Per-allele results for simulated variants (produced by `simulate` + `run --per-allele`).
+- `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with percentile relative to simulated distribution.
+- `percentile_per_allele_best_ranks.csv`: Observed per-allele fold changes with percentile relative to simulated distribution (written by `percentile --per-allele`).
 
 ## Citation
 If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
