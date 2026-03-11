@@ -164,7 +164,7 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 ./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--per-allele] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - As above, but uses a representative supertype HLA panel.
-- `--per-allele` is available but note that panel alleles are population-frequency surrogates rather than an individual's genotype, so per-allele results reflect population-level coverage rather than personal immunogenicity.
+- `--per-allele` is available but note that panel alleles are population-frequency surrogates rather than an individual's genotype, so per-allele results reflect population-level coverage rather than individual immunogenicity.
 
 ### 6. Compute Percentiles (Benchmarking)
 ```bash
