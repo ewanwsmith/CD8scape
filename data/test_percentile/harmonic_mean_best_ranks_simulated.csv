@@ -1,7 +1,0 @@
-Frame,Locus,Mutation,HMBR_A,HMBR_D,foldchange_HMBR,log2_foldchange_HMBR
-NSP3,3,K55M,1.0,0.25,0.25,-2.0
-NSP3,4,T89L,1.0,1.0,1.0,0.0
-Spike,5,R200P,1.0,4.0,4.0,2.0
-Spike,6,L300V,1.0,8.0,8.0,3.0
-NSP3,1,A17T,0.9,2.5,2.778,1.474
-Spike,2,G120R,1.2,0.8,0.667,-0.585
