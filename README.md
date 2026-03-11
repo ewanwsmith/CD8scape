@@ -13,7 +13,7 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 ## Requirements
 - Perl 5
 - Julia v1.11+
-- [netMHCpan 4.1](https://services.healthtech.dtu.dk/services/NetMHCpan-4.1/)
+- [netMHCpan 4.1](https://services.healthtech.dtu.dk/services/NetMHCpan-4.1/) or [netMHCpan 4.2](https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/)
 
 ## Installation
 1. Clone the repository:
