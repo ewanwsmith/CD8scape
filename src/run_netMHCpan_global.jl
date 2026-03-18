@@ -121,12 +121,7 @@ function main()
         1
     end
     default_cap = max(1, Int(floor(cpu_threads / 2)))
-    env_cap = try
-        haskey(ENV, "CD8SCAPE_MAX_THREADS") ? max(1, parse(Int, ENV["CD8SCAPE_MAX_THREADS"])) : nothing
-    catch
-        nothing
-    end
-    cap = env_cap === nothing ? default_cap : env_cap
+    cap = get_env_int("CD8SCAPE_MAX_THREADS", default_cap)
     threads = 1
     if requested !== nothing
         v = lowercase(String(requested))
@@ -361,22 +356,12 @@ function main()
     CSV.write(squish_map_path, squish_map_df)
     println("Squishing map written to $(squish_map_path)")
 
-    netmhcpan_exec = netMHCpan_path
-
     # netMHCpan 4.2 enforces two limits on the -a allele argument:
     #   1. A 1024-character PTYPE_LINE limit on the joined allele string.
     #   2. An internal array limit of 78 alleles per call (79+ causes a crash).
     # Build batches greedily so each batch respects both limits.
-    allele_char_limit = try
-        haskey(ENV, "CD8SCAPE_ALLELE_CHAR_LIMIT") ? max(1, parse(Int, ENV["CD8SCAPE_ALLELE_CHAR_LIMIT"])) : 1023
-    catch
-        1023
-    end
-    allele_count_limit = try
-        haskey(ENV, "CD8SCAPE_ALLELE_COUNT_LIMIT") ? max(1, parse(Int, ENV["CD8SCAPE_ALLELE_COUNT_LIMIT"])) : 75
-    catch
-        75
-    end
+    allele_char_limit  = get_env_int("CD8SCAPE_ALLELE_CHAR_LIMIT", 1023)
+    allele_count_limit = get_env_int("CD8SCAPE_ALLELE_COUNT_LIMIT", 75)
     allele_batches = Vector{Vector{String}}()
     let current = String[], cur_len = 0
         for allele in allele_list
@@ -427,7 +412,7 @@ function main()
     function run_unit(chunk_idx::Int, batch_idx::Int, pep_file::String)
         batch = allele_batches[batch_idx]
         out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(batch_idx).tsv")
-        cmd = Cmd([netmhcpan_exec, "-p", pep_file, "-xls", "-a", join(batch, ","), "-xlsfile", out_file])
+        cmd = Cmd([netMHCpan_path, "-p", pep_file, "-xls", "-a", join(batch, ","), "-xlsfile", out_file])
         try
             if verbose
                 log_file = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(batch_idx).txt")
@@ -469,12 +454,12 @@ function main()
             last_len = 0
             while true
                 sleep(0.5)
-                pct, done = lock(progress_lock) do
-                    p = total_units == 0 ? 100 : Int(floor(100 * completed_ref[] / total_units))
-                    d = completed_ref[] >= total_units
-                    p, d
+                pct, done, count = lock(progress_lock) do
+                    c = completed_ref[]
+                    p = total_units == 0 ? 100 : Int(floor(100 * c / total_units))
+                    p, c >= total_units, c
                 end
-                line = "$(completed_ref[])/$(total_units) units complete. $(pct)%"
+                line = "$(count)/$(total_units) units complete. $(pct)%"
                 print("\r", line)
                 if length(line) < last_len; print(" "^(last_len - length(line))); end
                 flush(stdout)
@@ -532,14 +517,14 @@ function main()
                 temp_pep_files[chunk_idx] === nothing && continue
                 batch_files = [results_matrix[chunk_idx, bi] for bi in 1:n_batches]
                 any(f -> f === nothing || !isfile(f), batch_files) && continue
-                lines_per_batch = [collect(eachline(f)) for f in batch_files]
+                lines_per_batch = [[split(line, '\t') for line in eachline(f)] for f in batch_files]
                 nlines = length(lines_per_batch[1])
                 for bl in lines_per_batch
                     length(bl) == nlines || error("Mismatched line counts across batches in chunk $(chunk_idx).")
                 end
                 if !col_header_written
-                    fixed_hdr = split(lines_per_batch[1][2], '\t')[1:min(3, length(split(lines_per_batch[1][2], '\t')))]
-                    raw_hdr_cols = [split(bl[2], '\t')[4:end] for bl in lines_per_batch]
+                    fixed_hdr = lines_per_batch[1][2][1:min(3, length(lines_per_batch[1][2]))]
+                    raw_hdr_cols = [bl[2][4:end] for bl in lines_per_batch]
                     # Detect trailing Ave/NB summary cols per batch from the column header
                     trim_counts = [length(c) >= 2 && strip(c[end]) == "NB" && strip(c[end-1]) == "Ave" ? 2 : 0 for c in raw_hdr_cols]
                     allele_cols = [c[1:end-t] for (c, t) in zip(raw_hdr_cols, trim_counts)]
@@ -547,8 +532,8 @@ function main()
                     col_header_written = true
                 end
                 for row_idx in 3:nlines
-                    fp = split(lines_per_batch[1][row_idx], '\t')
-                    raw_data_cols = [split(bl[row_idx], '\t')[4:end] for bl in lines_per_batch]
+                    fp = lines_per_batch[1][row_idx]
+                    raw_data_cols = [bl[row_idx][4:end] for bl in lines_per_batch]
                     data_allele_cols = [c[1:end-t] for (c, t) in zip(raw_data_cols, trim_counts)]
                     row = vcat(fp[1:min(3,length(fp))], reduce(vcat, data_allele_cols))
                     println(out_io, join(row, '\t'))
