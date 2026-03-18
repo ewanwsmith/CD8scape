@@ -155,7 +155,7 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 ./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--per-allele] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
 - Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
-- `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use the safety cap.
+- `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use all available threads up to the safety cap (overridable via `CD8SCAPE_MAX_THREADS`).
 - `--verbose`: preserve per-allele logs and temp files for debugging.
 - `--per-allele`: compute log2 fold change for every allele in the genome individually. Only alleles where the ancestral EL rank is ≤ 2% are included. Writes a separate `per_allele_best_ranks.csv` with columns `Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, and `log2_foldchange_BR`.
 
@@ -206,10 +206,26 @@ These options allow multiple independent analyses (e.g. observed vs. simulated) 
 - `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with percentile relative to simulated distribution.
 - `percentile_per_allele_best_ranks.csv`: Observed per-allele fold changes with percentile relative to simulated distribution (written by `percentile --per-allele`).
 
+## Advanced Configuration
+
+The following environment variables can be set to override internal defaults for large-panel or resource-constrained runs:
+
+| Variable | Default | Description |
+|---|---|---|
+| `CD8SCAPE_MAX_THREADS` | 8 | Safety cap on parallel netMHCpan chunks when `--t max` is used. |
+| `CD8SCAPE_ALLELE_CHAR_LIMIT` | 1023 | Maximum character length of the allele string passed to a single netMHCpan call. Alleles are batched when this limit would be exceeded. |
+| `CD8SCAPE_ALLELE_COUNT_LIMIT` | 75 | Maximum number of alleles passed to a single netMHCpan call. Alleles are batched when this limit would be exceeded. |
+
+## Example Data
+
+`data/Example_data/` contains a minimal synthetic dataset for quickly testing the pipeline end-to-end. It includes a 53-amino-acid ORF, two amino-acid variants (`.aa` format), a three-allele genotype, and a small supertype panel.
+
+Real-world SARS-CoV-2 data used in development is in `data/Stanevich_et_al/`.
+
 ## Citation
 If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
 
-Example data is from:
+Real-world example data (`data/Stanevich_et_al/`) is from:
 Stanevich, O.V., Alekseeva, E.I., Sergeeva, M. et al. SARS-CoV-2 escape from cytotoxic T cells during long-term COVID-19. Nat Commun 14, 149 (2023). https://doi.org/10.1038/s41467-022-34033-x
 
 

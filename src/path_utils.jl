@@ -109,3 +109,15 @@ This does not validate existence; it only builds the path.
 function resolve_write(base_path::AbstractString; suffix::AbstractString="")::String
     return with_suffix(base_path, suffix)
 end
+
+"""
+Read an integer from ENV[key], returning `default` when the variable is absent
+or its value cannot be parsed. The result is clamped to >= `min_val`.
+"""
+function get_env_int(key::AbstractString, default::Int; min_val::Int=1)::Int
+    try
+        haskey(ENV, key) ? max(min_val, parse(Int, ENV[key])) : default
+    catch
+        default
+    end
+end
