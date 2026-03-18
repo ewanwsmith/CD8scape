@@ -363,18 +363,25 @@ function main()
 
     netmhcpan_exec = netMHCpan_path
 
-    # netMHCpan 4.2 enforces a 1024-character PTYPE_LINE limit on the -a allele argument.
-    # Build batches greedily so each joined string stays within the limit.
+    # netMHCpan 4.2 enforces two limits on the -a allele argument:
+    #   1. A 1024-character PTYPE_LINE limit on the joined allele string.
+    #   2. An internal array limit of 78 alleles per call (79+ causes a crash).
+    # Build batches greedily so each batch respects both limits.
     allele_char_limit = try
         haskey(ENV, "CD8SCAPE_ALLELE_CHAR_LIMIT") ? max(1, parse(Int, ENV["CD8SCAPE_ALLELE_CHAR_LIMIT"])) : 1023
     catch
         1023
     end
+    allele_count_limit = try
+        haskey(ENV, "CD8SCAPE_ALLELE_COUNT_LIMIT") ? max(1, parse(Int, ENV["CD8SCAPE_ALLELE_COUNT_LIMIT"])) : 75
+    catch
+        75
+    end
     allele_batches = Vector{Vector{String}}()
     let current = String[], cur_len = 0
         for allele in allele_list
             entry_len = length(allele) + (isempty(current) ? 0 : 1)   # +1 for comma
-            if !isempty(current) && cur_len + entry_len > allele_char_limit
+            if !isempty(current) && (cur_len + entry_len > allele_char_limit || length(current) >= allele_count_limit)
                 push!(allele_batches, current)
                 current = [allele]
                 cur_len = length(allele)
@@ -387,7 +394,7 @@ function main()
     end
     n_batches = length(allele_batches)
     if n_batches > 1
-        println("Splitting $(length(allele_list)) alleles into $(n_batches) batches (netMHCpan -a limit: $(allele_char_limit) chars).")
+        println("Splitting $(length(allele_list)) alleles into $(n_batches) batches (char limit: $(allele_char_limit), count limit: $(allele_count_limit)).")
     end
 
     # Chunk peptides
@@ -504,6 +511,9 @@ function main()
 
     # Merge: for each chunk, horizontally stitch per-batch files (fixed cols from batch 1,
     # allele cols from all batches in order), then vertically concatenate chunks.
+    # netMHCpan 4.2 appends "Ave" and "NB" summary columns at the end of each row/header.
+    # These are row-level averages (not per-allele); we detect and strip them so the output
+    # has exactly 4 cols per allele, which process_output.pl requires.
     print("\n")
     status("Merging chunk outputs into $xlsfile_path ...")
 
@@ -517,6 +527,7 @@ function main()
             println(out_io, join(header, '\t'))
         else
             col_header_written = false
+            trim_counts = Int[]  # trailing summary cols to drop from each batch (set on first chunk)
             for chunk_idx in 1:total_chunks
                 temp_pep_files[chunk_idx] === nothing && continue
                 batch_files = [results_matrix[chunk_idx, bi] for bi in 1:n_batches]
@@ -528,14 +539,18 @@ function main()
                 end
                 if !col_header_written
                     fixed_hdr = split(lines_per_batch[1][2], '\t')[1:min(3, length(split(lines_per_batch[1][2], '\t')))]
-                    allele_cols = [split(bl[2], '\t')[4:end] for bl in lines_per_batch]
+                    raw_hdr_cols = [split(bl[2], '\t')[4:end] for bl in lines_per_batch]
+                    # Detect trailing Ave/NB summary cols per batch from the column header
+                    trim_counts = [length(c) >= 2 && strip(c[end]) == "NB" && strip(c[end-1]) == "Ave" ? 2 : 0 for c in raw_hdr_cols]
+                    allele_cols = [c[1:end-t] for (c, t) in zip(raw_hdr_cols, trim_counts)]
                     println(out_io, join(vcat(fixed_hdr, reduce(vcat, allele_cols)), '\t'))
                     col_header_written = true
                 end
                 for row_idx in 3:nlines
                     fp = split(lines_per_batch[1][row_idx], '\t')
-                    row = vcat(fp[1:min(3,length(fp))],
-                               reduce(vcat, [split(bl[row_idx], '\t')[4:end] for bl in lines_per_batch]))
+                    raw_data_cols = [split(bl[row_idx], '\t')[4:end] for bl in lines_per_batch]
+                    data_allele_cols = [c[1:end-t] for (c, t) in zip(raw_data_cols, trim_counts)]
+                    row = vcat(fp[1:min(3,length(fp))], reduce(vcat, data_allele_cols))
                     println(out_io, join(row, '\t'))
                 end
             end

@@ -29,6 +29,15 @@ my $total_cols = scalar(@header_cols);
 my $haplotype_start = 3;
 my $available_haplotype_cols = $total_cols - 3;
 
+# netMHCpan 4.2 appends "Ave" and "NB" summary columns at the end of each row.
+# These are row-level averages, not per-allele data. Subtract them so per-allele
+# column width is computed correctly (always 4 per allele).
+if ($available_haplotype_cols >= 2
+    && $header_cols[-1] eq 'NB'
+    && $header_cols[-2] eq 'Ave') {
+    $available_haplotype_cols -= 2;
+}
+
 # Determine per-haplotype column width robustly and extract the per-haplotype column names
 my $cols_per_haplotype = 4;
 if ($num_haplotypes > 0) {
