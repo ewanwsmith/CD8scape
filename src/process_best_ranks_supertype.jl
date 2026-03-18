@@ -243,7 +243,10 @@ println("Saved best ranks to $best_ranks_file")
 
 println("Calculating weighted harmonic mean best ranks (HMBR) per Frame/Locus...")
 if !isempty(best_ranks)
-    freq_path = joinpath(folder_path, "supertype_panel.csv")
+    # Prefer the squished panel (produced by run_netMHCpan_global) when available — it has
+    # frequencies already merged for any equivalent alleles that were deduplicated.
+    squished_path = joinpath(folder_path, "supertype_panel_squished.csv")
+    freq_path = isfile(squished_path) ? squished_path : joinpath(folder_path, "supertype_panel.csv")
     if !isfile(freq_path)
         println("Error: Could not find supertype_panel.csv in $folder_path.")
         exit(1)

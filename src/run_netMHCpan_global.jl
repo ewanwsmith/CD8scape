@@ -181,7 +181,6 @@ function main()
     peptides_file = resolve_read(joinpath(folder_path, "Peptides.pep"); suffix="", latest=latest)
     # Use lowercase filename to match downstream Perl script expectation
     xlsfile_path = resolve_write(joinpath(folder_path, "netmhcpan_output.tsv"); suffix=suffix)
-    cache_file   = resolve_write(joinpath(folder_path, "results_cache.jls"); suffix=suffix)
 
     # Check if required files exist
     if !isfile(peptides_file)
@@ -195,7 +194,7 @@ function main()
             write(io, "test")
         end
         rm(test_file)
-    catch e
+    catch
         error("ERROR: Cannot write to output folder. Check permissions!")
     end
 
@@ -209,12 +208,9 @@ function main()
         println("No peptides remaining after filtering (synonymity/stop codons).")
     end
 
-
-    # TODO: Chunking and cache lookup logic will go here
-
     # Read alleles from the supertype_panel.csv file (robust to header quirks)
     df = CSV.read(representatives_file, DataFrame; normalizenames=true)
-    
+
     # Normalize column names: strip spaces/NBSP and lowercase
     function _clean_sym(n)
         # Accept Symbol or String column names, normalize to lowercase Symbol
@@ -224,7 +220,7 @@ function main()
         return Symbol(lowercase(str))
     end
     rename!(df, Dict(n => _clean_sym(n) for n in names(df)))
-    
+
     # Discover the allele and (optional) frequency columns robustly
     function _find_col(df::DataFrame, target::String)
         for n in names(df)
@@ -242,7 +238,7 @@ function main()
     end
     freq_col = _find_col(df, "frequency")
     locus_col = _find_col(df, "locus")
-    
+
     # Optional Frequency filtering if present (accepts string or number)
     if freq_col !== nothing
         df[!, freq_col] = map(x -> try
@@ -254,7 +250,7 @@ function main()
             end, df[!, freq_col])
         df = filter(row -> row[freq_col] !== missing && row[freq_col] != 0.0, df)
     end
-    
+
     # Clean allele strings in the discovered allele column
     clean_allele = function(a)
         s = String(a)
@@ -300,7 +296,7 @@ function main()
             end
         end
     end
-    
+
     # Filter out only NA/missing/empty entries; do not restrict to NetMHCpan lists
     valid_mask = map(a -> a !== missing && !isempty(strip(String(a))) && lowercase(strip(String(a))) ∉ ("na", "nan", "missing"), df[!, allele_col])
     dropped_invalid = count(.!valid_mask)
@@ -308,278 +304,248 @@ function main()
         println("Dropping $(dropped_invalid) invalid/NA/empty allele entries before NetMHCpan run")
         df = df[valid_mask, :]
     end
-    # Build allele list for netMHCpan (remove '*' as expected by downstream)
-    allele_list = [replace(String(a), "*" => "") for a in collect(df[!, allele_col])]
-    alleles = join(allele_list, ",")
+
+    # Build allele list for netMHCpan (remove '*') and gather frequencies
+    raw_netmhcpan = [replace(String(a), "*" => "") for a in collect(df[!, allele_col])]
+    raw_canonical  = [String(a) for a in collect(df[!, allele_col])]
+    raw_freqs = freq_col !== nothing ?
+        Float64[coalesce(x, 0.0) for x in df[!, freq_col]] :
+        fill(1.0 / max(1, nrow(df)), nrow(df))
+
+    # Allele squishing: merge alleles that are identical after * removal (i.e. the same netMHCpan call).
+    # Frequencies are summed for merged alleles so downstream weighting remains correct.
+    seen_idx  = Dict{String, Int}()
+    allele_list      = String[]   # deduplicated netMHCpan strings (no *)
+    allele_canonical = String[]   # canonical form with * (for squished panel CSV)
+    allele_freq_sum  = Float64[]  # summed frequencies
+    squish_originals = Dict{String, Vector{String}}()  # netMHCpan string → all canonical forms
+
+    for (net_a, canon_a, f) in zip(raw_netmhcpan, raw_canonical, raw_freqs)
+        if haskey(seen_idx, net_a)
+            i = seen_idx[net_a]
+            allele_freq_sum[i] += f
+            push!(squish_originals[net_a], canon_a)
+        else
+            push!(allele_list, net_a)
+            push!(allele_canonical, canon_a)
+            push!(allele_freq_sum, f)
+            seen_idx[net_a] = length(allele_list)
+            squish_originals[net_a] = [canon_a]
+        end
+    end
+
+    n_squished_groups = count(v -> length(v) > 1, values(squish_originals))
+    if n_squished_groups > 0
+        println("Allele squishing: $(n_squished_groups) group(s) of equivalent alleles merged:")
+        for net_a in allele_list
+            if length(squish_originals[net_a]) > 1
+                idx = seen_idx[net_a]
+                println("  $(net_a): $(join(squish_originals[net_a], ", ")) → combined frequency $(round(allele_freq_sum[idx]; digits=4))")
+            end
+        end
+        println("Panel reduced from $(length(raw_netmhcpan)) to $(length(allele_list)) unique alleles for netMHCpan.")
+    end
+
+    # Save squished panel so process_best_ranks_supertype can use the merged frequencies
+    squished_panel_path = joinpath(folder_path, "supertype_panel_squished.csv")
+    CSV.write(squished_panel_path, DataFrame(:Allele => allele_canonical, :Frequency => allele_freq_sum))
+    println("Squished panel written to $(squished_panel_path)")
+
+    # Save squishing map: one row per original panel allele, showing what it was merged into
+    squish_map_df = DataFrame(
+        :Original_Allele  => raw_canonical,
+        :Squished_Into    => [allele_canonical[seen_idx[net_a]] for net_a in raw_netmhcpan],
+        :Was_Squished     => [length(squish_originals[net_a]) > 1 for net_a in raw_netmhcpan],
+    )
+    squish_map_path = joinpath(folder_path, "squishing_map.csv")
+    CSV.write(squish_map_path, squish_map_df)
+    println("Squishing map written to $(squish_map_path)")
+
     netmhcpan_exec = netMHCpan_path
 
-    # Prepare to chunk peptides and check cache
+    # netMHCpan 4.2 enforces a 1024-character PTYPE_LINE limit on the -a allele argument.
+    # Build batches greedily so each joined string stays within the limit.
+    allele_char_limit = try
+        haskey(ENV, "CD8SCAPE_ALLELE_CHAR_LIMIT") ? max(1, parse(Int, ENV["CD8SCAPE_ALLELE_CHAR_LIMIT"])) : 1023
+    catch
+        1023
+    end
+    allele_batches = Vector{Vector{String}}()
+    let current = String[], cur_len = 0
+        for allele in allele_list
+            entry_len = length(allele) + (isempty(current) ? 0 : 1)   # +1 for comma
+            if !isempty(current) && cur_len + entry_len > allele_char_limit
+                push!(allele_batches, current)
+                current = [allele]
+                cur_len = length(allele)
+            else
+                push!(current, allele)
+                cur_len += entry_len
+            end
+        end
+        isempty(current) || push!(allele_batches, current)
+    end
+    n_batches = length(allele_batches)
+    if n_batches > 1
+        println("Splitting $(length(allele_list)) alleles into $(n_batches) batches (netMHCpan -a limit: $(allele_char_limit) chars).")
+    end
 
+    # Chunk peptides
     chunk_size = 1000
     total_peptides = length(peptide_list)
     peptide_chunks = [peptide_list[i:min(i+chunk_size-1, total_peptides)] for i in 1:chunk_size:total_peptides]
-    # No cache logic
-    # For each chunk, run NetMHCpan only on uncached peptides
-    temp_out_files = String[]
     total_chunks = length(peptide_chunks)
     total_alleles = length(allele_list)
-    # Precompute chunk sizes and cumulative counts for accurate progress
-    chunk_lengths = map(length, peptide_chunks)
-    cumulative_lengths = cumsum([0; chunk_lengths[1:end-1]])
-    # Helper to run a single chunk (all alleles) and return its temp outputs
-    function run_chunk(chunk_idx::Int, chunk_peps::Vector{<:AbstractString})
-        temp_pep_file = joinpath(folder_path, "_temp_peptides_$(chunk_idx).pep")
-        open(temp_pep_file, "w") do io
-            for pep in chunk_peps
-                println(io, pep)
-            end
-        end
-        temp_out_files_chunk = String[]
-        for (allele_idx, allele) in enumerate(allele_list)
-            temp_out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(allele_idx).tsv")
-            push!(temp_out_files_chunk, temp_out_file)
-            cmd = Cmd([netmhcpan_exec, "-p", temp_pep_file, "-xls", "-a", allele, "-xlsfile", temp_out_file])
-            # Progress based on total peptides across alleles, accounting for variable chunk sizes
-            total_work = total_alleles * total_peptides
-            processed_before_chunk = total_alleles * cumulative_lengths[chunk_idx]
-            processed_in_current = allele_idx * length(chunk_peps)
-            percent_done = Int(floor(100 * (processed_before_chunk + processed_in_current) / total_work))
-            status("Running chunk $(chunk_idx) / $(total_chunks). Chunk size: $(length(chunk_peps)) peptides. $(percent_done)% complete."; overwrite=true)
-            try
-                if verbose
-                    allele_log = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt")
-                    open(allele_log, "w") do log_io
-                        run(pipeline(cmd, stdout=log_io, stderr=log_io))
-                    end
-                else
-                    run(pipeline(cmd, stdout=devnull, stderr=devnull))
-                end
-                if !isfile(temp_out_file)
-                    error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
-                end
-            catch e
-                println("\nError running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
-                println("Command attempted: ", join(cmd.exec, " "))
-                exit(1)
-            end
-        end
-        return temp_out_files_chunk
-    end
-    # Run chunks with bounded concurrency based on --t/--thread
-    sem = Base.Semaphore(threads)
-    results = Vector{Vector{String}}(undef, total_chunks)
-    tasks = Task[]
+    total_units  = total_chunks * n_batches   # each unit = one netMHCpan call
 
-    # Shared progress state for parallel reporting
-    total_work = total_alleles * total_peptides
-    progress_lock = ReentrantLock()
-    active_chunks = Set{Int}()
-    processed_ref = Ref(0)
-    reporter_task = nothing
-    if threads > 1 && total_work > 0
+    # Write all peptide chunk files upfront (fast sequential I/O).
+    # netMHCpan only reads these files, so multiple concurrent tasks can share a peptide file.
+    temp_pep_files = Vector{Union{String,Nothing}}(undef, total_chunks)
+    for (chunk_idx, chunk_peps) in enumerate(peptide_chunks)
+        if isempty(chunk_peps)
+            temp_pep_files[chunk_idx] = nothing
+            continue
+        end
+        f = joinpath(folder_path, "_temp_peptides_$(chunk_idx).pep")
+        open(f, "w") do io
+            for pep in chunk_peps; println(io, pep); end
+        end
+        temp_pep_files[chunk_idx] = f
+    end
+
+    # results_matrix[chunk_idx, batch_idx] = output file path (nothing if chunk was empty)
+    results_matrix = Matrix{Union{String,Nothing}}(nothing, total_chunks, n_batches)
+
+    # Single work unit: one netMHCpan call for (chunk_idx, batch_idx).
+    function run_unit(chunk_idx::Int, batch_idx::Int, pep_file::String)
+        batch = allele_batches[batch_idx]
+        out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(batch_idx).tsv")
+        cmd = Cmd([netmhcpan_exec, "-p", pep_file, "-xls", "-a", join(batch, ","), "-xlsfile", out_file])
+        try
+            if verbose
+                log_file = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(batch_idx).txt")
+                open(log_file, "w") do io; run(pipeline(cmd, stdout=io, stderr=io)); end
+            else
+                run(pipeline(cmd, stdout=devnull, stderr=devnull))
+            end
+            if !isfile(out_file)
+                error("NetMHCpan did not create output for chunk $(chunk_idx), batch $(batch_idx).")
+            end
+        catch e
+            println("\nError on chunk $(chunk_idx), batch $(batch_idx): ", e)
+            println("Command: ", join(cmd.exec, " "))
+            exit(1)
+        end
+        return out_file
+    end
+
+    if threads == 1
+        # Sequential: iterate over chunks then batches, showing progress per unit.
+        for chunk_idx in 1:total_chunks
+            pep_file = temp_pep_files[chunk_idx]
+            pep_file === nothing && continue
+            for batch_idx in 1:n_batches
+                pct = Int(floor(100 * ((chunk_idx-1)*n_batches + (batch_idx-1)) / max(1, total_units)))
+                status("Chunk $(chunk_idx)/$(total_chunks), batch $(batch_idx)/$(n_batches) ($(length(peptide_chunks[chunk_idx])) peptides, $(total_alleles) alleles). $(pct)% complete."; overwrite=true)
+                results_matrix[chunk_idx, batch_idx] = run_unit(chunk_idx, batch_idx, pep_file)
+            end
+        end
+    else
+        # Parallel: all (chunk, batch) units compete for `threads` concurrent slots.
+        # This naturally adapts: many chunks + few batches → threads spread across chunks;
+        # few chunks + many batches → threads spread across batches; mixed → both.
+        sem = Base.Semaphore(threads)
+        progress_lock = ReentrantLock()
+        completed_ref = Ref(0)
+
         reporter_task = @async begin
             last_len = 0
             while true
                 sleep(0.5)
-                running = Int[]
-                pct = 100
-                done = false
-                lock(progress_lock) do
-                    running = sort(collect(active_chunks))
-                    pct = total_work == 0 ? 100 : Int(floor(100 * processed_ref[] / total_work))
-                    done = (processed_ref[] >= total_work) || (isempty(running) && processed_ref[] > 0)
+                pct, done = lock(progress_lock) do
+                    p = total_units == 0 ? 100 : Int(floor(100 * completed_ref[] / total_units))
+                    d = completed_ref[] >= total_units
+                    p, d
                 end
-                line = "Running chunks: " * (isempty(running) ? "-" : join(running, ", ")) * " of $(total_chunks) total. $(pct)% complete"
+                line = "$(completed_ref[])/$(total_units) units complete. $(pct)%"
                 print("\r", line)
-                if length(line) < last_len
-                    print(" "^(last_len - length(line)))
-                end
+                if length(line) < last_len; print(" "^(last_len - length(line))); end
                 flush(stdout)
                 last_len = length(line)
-                if done
-                    break
-                end
+                if done; break; end
             end
             println()
         end
-    end
 
-    for (chunk_idx, chunk) in enumerate(peptide_chunks)
-        chunk_peps = chunk
-        if isempty(chunk_peps)
-            results[chunk_idx] = String[]
-            continue
-        end
-        t = @async begin
-            Base.acquire(sem)
-            try
-                if threads == 1
-                    # Original per-chunk progress output
-                    results[chunk_idx] = run_chunk(chunk_idx, chunk_peps)
-                else
-                    # Parallel mode: suppress per-chunk printing and update global progress
-                    lock(progress_lock) do
-                        push!(active_chunks, chunk_idx)
-                    end
-                    temp_pep_file = joinpath(folder_path, "_temp_peptides_$(chunk_idx).pep")
-                    open(temp_pep_file, "w") do io
-                        for pep in chunk_peps
-                            println(io, pep)
-                        end
-                    end
-                    temp_out_files_chunk = String[]
-                    for (allele_idx, allele) in enumerate(allele_list)
-                        temp_out_file = joinpath(folder_path, "_temp_netMHCpan_output_$(chunk_idx)_$(allele_idx).tsv")
-                        push!(temp_out_files_chunk, temp_out_file)
-                        cmd = Cmd([netmhcpan_exec, "-p", temp_pep_file, "-xls", "-a", allele, "-xlsfile", temp_out_file])
-                        try
-                            if verbose
-                                allele_log = joinpath(folder_path, "_temp_netMHCpan_log_$(chunk_idx)_$(allele_idx).txt")
-                                open(allele_log, "w") do log_io
-                                    run(pipeline(cmd, stdout=log_io, stderr=log_io))
-                                end
-                            else
-                                run(pipeline(cmd, stdout=devnull, stderr=devnull))
-                            end
-                            if !isfile(temp_out_file)
-                                error("ERROR: NetMHCpan did not create the expected output file for chunk/allele.")
-                            end
-                        catch e
-                            println("\nError running NetMHCpan on chunk $(chunk_idx), allele $(allele): ", e)
-                            println("Command attempted: ", join(cmd.exec, " "))
-                            exit(1)
-                        end
+        all_tasks = Task[]
+        for chunk_idx in 1:total_chunks
+            pep_file = temp_pep_files[chunk_idx]
+            pep_file === nothing && continue
+            for batch_idx in 1:n_batches
+                ci, bi, pf = chunk_idx, batch_idx, pep_file   # capture for closure
+                t = @async begin
+                    Base.acquire(sem)
+                    try
+                        out_file = run_unit(ci, bi, pf)
                         lock(progress_lock) do
-                            processed_ref[] += length(chunk_peps)
+                            results_matrix[ci, bi] = out_file
+                            completed_ref[] += 1
                         end
-                    end
-                    results[chunk_idx] = temp_out_files_chunk
-                end
-            finally
-                if threads > 1 && total_work > 0
-                    lock(progress_lock) do
-                        delete!(active_chunks, chunk_idx)
+                    finally
+                        Base.release(sem)
                     end
                 end
-                Base.release(sem)
+                push!(all_tasks, t)
             end
         end
-        push!(tasks, t)
-    end
-
-    for t in tasks
-        wait(t)
-    end
-    if reporter_task !== nothing
+        for t in all_tasks; wait(t); end
         wait(reporter_task)
     end
-    for r in results
-        append!(temp_out_files, r)
-    end
-    # Merge all temp output files into final netmhcpan_output.tsv
-    # Ensure the progress line ends with a newline before merging message
+
+    # Merge: for each chunk, horizontally stitch per-batch files (fixed cols from batch 1,
+    # allele cols from all batches in order), then vertically concatenate chunks.
     print("\n")
     status("Merging chunk outputs into $xlsfile_path ...")
 
     open(xlsfile_path, "w") do out_io
-        # Write a combined allele header line using the alleles from allele_list
-        # Start with two leading tabs to mirror NetMHCpan XLS formatting
+        # Line 1: allele names (tab-separated, two leading tabs) for process_output.pl
         println(out_io, "\t\t" * join(allele_list, '\t'))
 
-        # Group temp output files by chunk index so we can horizontally merge per-allele columns
-        chunk_map = Dict{Int, Vector{String}}()
-        for f in temp_out_files
-            m = match(r"_temp_netMHCpan_output_(\d+)_(\d+)\.tsv$", f)
-            if m === nothing
-                error("Unexpected temp file name format: $f")
-            end
-            chunk_idx = parse(Int, m.captures[1])
-            allele_idx = parse(Int, m.captures[2])
-            arr = get!(chunk_map, chunk_idx, Vector{String}())
-            if length(arr) < length(allele_list)
-                resize!(arr, length(allele_list))
-            end
-            arr[allele_idx] = f
-            chunk_map[chunk_idx] = arr
-        end
-
-        sorted_chunks = sort(collect(keys(chunk_map)))
-        if isempty(sorted_chunks)
-            # No temp outputs; write a minimal stub to satisfy Perl
-            println(out_io, join(allele_list, '\t'))
+        if isempty(peptide_list)
             header = String["Pos", "Peptide", "ID"]
-            for _ in allele_list
-                append!(header, ["core", "icore", "EL-score", "EL_Rank"])
-            end
+            for _ in allele_list; append!(header, ["core", "icore", "EL-score", "EL_Rank"]); end
             println(out_io, join(header, '\t'))
         else
-            # Build combined column header from first complete chunk
-            header_built = false
-            for chunk_idx in sorted_chunks
-                files_vec = chunk_map[chunk_idx]
-                if any(x -> x === nothing || !isfile(x), files_vec)
-                    continue
+            col_header_written = false
+            for chunk_idx in 1:total_chunks
+                temp_pep_files[chunk_idx] === nothing && continue
+                batch_files = [results_matrix[chunk_idx, bi] for bi in 1:n_batches]
+                any(f -> f === nothing || !isfile(f), batch_files) && continue
+                lines_per_batch = [collect(eachline(f)) for f in batch_files]
+                nlines = length(lines_per_batch[1])
+                for bl in lines_per_batch
+                    length(bl) == nlines || error("Mismatched line counts across batches in chunk $(chunk_idx).")
                 end
-                fixed_header = String[]
-                allele_cols = Vector{Vector{String}}(undef, length(files_vec))
-                for (ai, fpath) in enumerate(files_vec)
-                    lines = collect(eachline(fpath))
-                    if length(lines) < 2
-                        continue
-                    end
-                    cols = split(lines[2], '\t')
-                    if isempty(fixed_header)
-                        append!(fixed_header, cols[1:min(3, length(cols))])
-                    end
-                    allele_cols[ai] = length(cols) > 3 ? cols[4:end] : String[]
-                end
-                if any(x -> x === nothing, allele_cols)
-                    continue
-                end
-                concat_allele_cols = reduce(vcat, allele_cols)
-                combined_cols = vcat(fixed_header, concat_allele_cols)
-                println(out_io, join(combined_cols, '\t'))
-                header_built = true
-                break
-            end
-            if !header_built
-                error("Could not construct combined column header from temporary outputs.")
-            end
-
-            # Write merged data rows, chunk by chunk
-            for chunk_idx in sorted_chunks
-                files_vec = chunk_map[chunk_idx]
-                if any(x -> x === nothing || !isfile(x), files_vec)
-                    error("Missing allele outputs for chunk $(chunk_idx). Cannot merge chunk.")
-                end
-                lines_per_allele = [collect(eachline(f)) for f in files_vec]
-                nlines = length(lines_per_allele[1])
-                for l in lines_per_allele
-                    if length(l) != nlines
-                        error("Mismatched line counts in chunk $(chunk_idx) allele outputs.")
-                    end
+                if !col_header_written
+                    fixed_hdr = split(lines_per_batch[1][2], '\t')[1:min(3, length(split(lines_per_batch[1][2], '\t')))]
+                    allele_cols = [split(bl[2], '\t')[4:end] for bl in lines_per_batch]
+                    println(out_io, join(vcat(fixed_hdr, reduce(vcat, allele_cols)), '\t'))
+                    col_header_written = true
                 end
                 for row_idx in 3:nlines
-                    first_parts = split(lines_per_allele[1][row_idx], '\t')
-                    fixed = first_parts[1:min(3, length(first_parts))]
-                    combined_row = String[]
-                    append!(combined_row, fixed)
-                    for ai in 1:length(files_vec)
-                        parts = split(lines_per_allele[ai][row_idx], '\t')
-                        if length(parts) >= 4
-                            append!(combined_row, parts[4:end])
-                        end
-                    end
-                    println(out_io, join(combined_row, '\t'))
+                    fp = split(lines_per_batch[1][row_idx], '\t')
+                    row = vcat(fp[1:min(3,length(fp))],
+                               reduce(vcat, [split(bl[row_idx], '\t')[4:end] for bl in lines_per_batch]))
+                    println(out_io, join(row, '\t'))
                 end
             end
+            col_header_written || error("Could not construct column header: no valid chunk output files found.")
         end
     end
 
     status("Merged output written to $xlsfile_path")
     # Cleanup temp files
     status("Cleaning up temporary files...")
-    # Remove temp files; when verbose, keep peptides and outputs, only delete logs.
     del_pep = 0; del_out = 0; del_logs = 0
     keep_pep = 0; keep_out = 0; keep_logs = 0
     kept_logs_list = String[]
