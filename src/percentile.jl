@@ -281,6 +281,35 @@ if abspath(PROGRAM_FILE) == @__FILE__
         println("Stouffer Z=$(round(Z_combined, digits=4))  p=$(round(p_combined, digits=6))  N=$(N_z)")
     end
 
+    # Empirical permutation test: sample 9999 sets of k from sim_vals, compare mean percentile
+    n_perm = 9999
+    if !isempty(valid_perc) && !isempty(sim_vals)
+        k_obs = length(valid_perc)
+        obs_mean_perc = sum(valid_perc) / k_obs
+        if length(sim_vals) < k_obs
+            println("Warning: sim pool ($(length(sim_vals))) < k ($(k_obs)); skipping empirical_p.")
+        else
+            local exceed_count = 0
+            for _ in 1:n_perm
+                samp = sample(sim_vals, k_obs; replace=false)
+                samp_mean_perc = sum(100.0 * F(v) for v in samp) / k_obs
+                if samp_mean_perc >= obs_mean_perc
+                    exceed_count += 1
+                end
+            end
+            p_empirical = exceed_count / n_perm
+            emp_vals = Dict{Symbol, Any}(Symbol(col) => missing for col in names(obs_df))
+            emp_vals[:Percentile] = obs_mean_perc
+            emp_vals[:p_value]    = p_empirical
+            if haskey(emp_vals, :Mutation)
+                emp_vals[:Mutation] = "empirical_p"
+            end
+            emp_row = DataFrame(Dict(kk => [vv] for (kk, vv) in emp_vals))
+            obs_df = vcat(obs_df, emp_row, cols=:union)
+            println("Empirical p=$(round(p_empirical, digits=6))  k=$(k_obs)  N_sim=$(length(sim_vals))  n_perm=$(n_perm)")
+        end
+    end
+
     # Write output next to observed, carrying through observed suffix
     out_suffix = _suffix_from_observed(obs_path, base_name)
     out_name = isempty(out_suffix) ? string(out_prefix, ".csv") : string(out_prefix, "_", out_suffix, ".csv")
