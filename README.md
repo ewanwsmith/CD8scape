@@ -176,7 +176,7 @@ Parses variants and reading frames from the data folder, producing `variants.csv
 - `--s <sim_file>`: path to the simulated file (defaults to `harmonic_mean_best_ranks_simulated.csv` or `per_allele_best_ranks_simulated.csv` depending on mode).
 - `--o <obs_file>`: path to the observed file (defaults to the most recent matching file in the data folder, excluding `_simulated`).
 - Observed variants are excluded from the simulated distribution before computing percentiles.
-- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv` (with a `Percentile` column, 0–100) to the data folder.
+- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv` to the data folder. Columns added: `Percentile` (0–100), `Z_i` (per-variant normal quantile of the percentile), and `p_value` (empty for individual variants). A final `combined_z` row is appended with the mean percentile, Stouffer's combined Z score, and the one-tailed p-value summarising whether the variant set is collectively more escape-prone than the simulated distribution.
 
 ### Global Options
 
@@ -203,8 +203,8 @@ These options allow multiple independent analyses (e.g. observed vs. simulated) 
 - `per_allele_best_ranks.csv`: Per-allele eluted ligand best ranks and log2 fold changes for every allele in the genome, filtered to ancestral EL rank ≤ 2% (`Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`). Written when `--per-allele` is passed to `run` or `run_supertype`.
 - `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results (produced by `simulate` + `run`).
 - `per_allele_best_ranks_simulated.csv`: Per-allele results for simulated variants (produced by `simulate` + `run --per-allele`).
-- `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with percentile relative to simulated distribution.
-- `percentile_per_allele_best_ranks.csv`: Observed per-allele fold changes with percentile relative to simulated distribution (written by `percentile --per-allele`).
+- `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with `Percentile`, `Z_i`, and `p_value` columns relative to the simulated distribution, plus a `combined_z` summary row (Stouffer's Z, mean percentile, one-tailed p-value).
+- `percentile_per_allele_best_ranks.csv`: Observed per-allele fold changes with the same Stouffer columns (written by `percentile --per-allele`).
 
 ## Advanced Configuration
 
