@@ -282,7 +282,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     end
 
     # Empirical permutation test: sample 9999 sets of k from sim_vals, compare mean percentile
-    n_perm = 9999
+    n_perm = 99999
     if !isempty(valid_perc) && !isempty(sim_vals)
         k_obs = length(valid_perc)
         obs_mean_perc = sum(valid_perc) / k_obs
