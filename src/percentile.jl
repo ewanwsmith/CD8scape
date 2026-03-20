@@ -87,6 +87,21 @@ function _make_key(df::DataFrame)
     end
 end
 
+# Stouffer helpers: probit (Abramowitz & Stegun) and normcdf (rational approx)
+function _probit(p::Float64)::Float64
+    p <= 0.0 && return -Inf; p >= 1.0 && return Inf
+    p < 0.5 && return -_probit(1.0 - p)
+    t = sqrt(-2.0 * log(1.0 - p))
+    c = (2.515517, 0.802853, 0.010328); d = (1.432788, 0.189269, 0.001308)
+    return t - (c[1] + c[2]*t + c[3]*t^2) / (1.0 + d[1]*t + d[2]*t^2 + d[3]*t^3)
+end
+function _normcdf(z::Float64)::Float64
+    z < 0.0 && return 1.0 - _normcdf(-z)
+    t = 1.0 / (1.0 + 0.2316419 * z)
+    poly = t*(0.319381530 + t*(-0.356563782 + t*(1.781477937 + t*(-1.821255978 + t*1.330274429))))
+    return 1.0 - exp(-z^2/2) / sqrt(2π) * poly
+end
+
 # Main program
 if abspath(PROGRAM_FILE) == @__FILE__
     if length(ARGS) < 1
@@ -232,6 +247,38 @@ if abspath(PROGRAM_FILE) == @__FILE__
             end
         end
         obs_df[!, :Percentile] = perc
+    end
+
+    # Stouffer's combined Z: Z_i per variant, COMBINED summary row
+    zi_col = Union{Float64, Missing}[]
+    valid_z = Float64[]; valid_perc = Float64[]
+    for p in obs_df[!, :Percentile]
+        if p isa Missing || (p isa Number && (!isfinite(p) || isnan(p)))
+            push!(zi_col, missing)
+        else
+            z = _probit(clamp(Float64(p), 0.01, 99.99) / 100.0)
+            push!(zi_col, z)
+            push!(valid_z, z)
+            push!(valid_perc, Float64(p))
+        end
+    end
+    obs_df[!, :Z_i]     = zi_col
+    obs_df[!, :p_value] = Union{Float64, Missing}[missing for _ in 1:nrow(obs_df)]
+
+    if !isempty(valid_z)
+        N_z        = length(valid_z)
+        Z_combined = sum(valid_z) / sqrt(N_z)
+        p_combined = 1.0 - _normcdf(Z_combined)
+        combined_vals = Dict{Symbol, Any}(Symbol(col) => missing for col in names(obs_df))
+        combined_vals[:Percentile] = sum(valid_perc) / N_z
+        combined_vals[:Z_i]        = Z_combined
+        combined_vals[:p_value]    = p_combined
+        if haskey(combined_vals, :Mutation)
+            combined_vals[:Mutation] = "combined_z"
+        end
+        combined_row = DataFrame(Dict(k => [v] for (k, v) in combined_vals))
+        obs_df = vcat(obs_df, combined_row, cols=:union)
+        println("Stouffer Z=$(round(Z_combined, digits=4))  p=$(round(p_combined, digits=6))  N=$(N_z)")
     end
 
     # Write output next to observed, carrying through observed suffix
