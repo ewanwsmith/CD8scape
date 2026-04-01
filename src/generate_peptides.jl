@@ -223,13 +223,14 @@ function check_locus(df::DataFrame)::DataFrame
                 end
                 ref_match = true
             else
-                # normalize against consensus at the adjusted locus
-                ref_len = length(r)
-                if 1 ≤ rl && rl + ref_len - 1 ≤ length(row.Consensus_sequence)
-                    r = row.Consensus_sequence[rl:(rl + ref_len - 1)]
-                    ref_match = true
-                    @warn "Reference allele mismatch at Locus $(row.Locus). Normalizing REF to consensus sequence."
-                end
+                # Do NOT overwrite r with the consensus here.  When multiple variants share
+                # the same locus (e.g. reversals or multi-ancestral sets), parse_aa_variants
+                # writes each ancestral codon into frames sequentially, so the last write
+                # wins.  Replacing r with whatever the consensus now says would corrupt
+                # earlier variants into synonymous (or wrong) changes.  Instead, trust the
+                # ref carried in variants.csv and let edit_ancestral_sequence patch the
+                # correct ancestral codon into the sequence on a per-row basis.
+                @warn "Reference allele mismatch at Locus $(row.Locus): REF '$(r)' not found in consensus. Using REF from variants.csv as-is (may indicate a same-locus multi-ancestral variant)."
             end
         end
         push!(norm_ref, r)
@@ -269,36 +270,56 @@ end
 """
     edit_ancestral_sequence(df::DataFrame) :: DataFrame
 
-Edits the ancestral (consensus) sequence at the relative locus to produce a derived sequence.
+Builds per-row ancestral and derived nucleotide sequences.
+
+For every row the ref codon from variants.csv (Normalized_Consensus) is spliced into
+the frame's Consensus_sequence at Relative_Locus to produce Ancestral_sequence.  The
+derived codon (Normalized_Variant) is then spliced in at the same position to produce
+Derived_sequence.
+
+Splicing the ref from variants.csv rather than relying on whatever the frame consensus
+already has at that position is essential when multiple variants share a locus (e.g.
+reversals or multi-ancestral sets).  parse_aa_variants writes each ancestral codon into
+frames sequentially, so only the last one is retained; all earlier rows would otherwise
+inherit the wrong ancestral codon.  By patching on a per-row basis we ensure both
+ancestral and derived sequences are correct for every variant independently of write order.
 
 # Arguments
 - df::DataFrame: Input DataFrame after check_locus.
 
 # Returns
-- A DataFrame with a new 'Derived_sequence' column.
+- A DataFrame with new 'Ancestral_sequence' and 'Derived_sequence' columns.
 """
 function edit_ancestral_sequence(df::DataFrame)::DataFrame
-    df[!, :Derived_sequence] = similar(df.Consensus_sequence)
+    df[!, :Ancestral_sequence] = similar(df.Consensus_sequence)
+    df[!, :Derived_sequence]   = similar(df.Consensus_sequence)
     for row in eachrow(df)
         rl = row.Relative_Locus
-        consensus = row.Consensus_sequence
-        variant_nt = String(row.Normalized_Variant)
-        ref_nt = String(row.Normalized_Consensus)
+        consensus   = row.Consensus_sequence
+        ref_nt      = String(row.Normalized_Consensus)
+        variant_nt  = String(row.Normalized_Variant)
 
         if !ismissing(rl) && 1 ≤ rl ≤ length(consensus)
-            ref_len = length(ref_nt)
-            seq_len = length(consensus)
-            if rl + ref_len - 1 ≤ seq_len && consensus[rl:(rl + ref_len - 1)] == ref_nt
-                prefix = rl > 1 ? consensus[1:(rl - 1)] : ""
-                suffix_start = rl + ref_len
-                suffix = suffix_start ≤ seq_len ? consensus[suffix_start:end] : ""
-                row.Derived_sequence = string(prefix, variant_nt, suffix)
+            ref_len      = length(ref_nt)
+            seq_len      = length(consensus)
+            suffix_start = rl + ref_len
+
+            if suffix_start - 1 ≤ seq_len
+                prefix  = rl > 1       ? consensus[1:(rl - 1)]   : ""
+                suffix  = suffix_start ≤ seq_len ? consensus[suffix_start:end] : ""
+                # Always patch the consensus with the variants.csv ref at this locus.
+                # This corrects for cases where frames.csv has been overwritten by a
+                # later same-locus record (the last-write-wins problem).
+                row.Ancestral_sequence = string(prefix, ref_nt,     suffix)
+                row.Derived_sequence   = string(prefix, variant_nt, suffix)
             else
-                @warn "Reference allele mismatch or out of bounds at Locus $(row.Locus). Keeping consensus sequence."
-                row.Derived_sequence = consensus
+                @warn "Ref allele out of bounds at Locus $(row.Locus). Keeping consensus sequence for both ancestral and derived."
+                row.Ancestral_sequence = consensus
+                row.Derived_sequence   = consensus
             end
         else
-            row.Derived_sequence = consensus
+            row.Ancestral_sequence = consensus
+            row.Derived_sequence   = consensus
         end
     end
     return df
@@ -320,8 +341,11 @@ function translate_sequences(df::DataFrame)::DataFrame
         join([get(CODON_DICT, uppercase(dna_sequence[i:i+2]), "?") 
               for i in 1:3:length(dna_sequence)-2], "")
     
-    df[!, :Ancestral_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Consensus_sequence]
-    df[!, :Derived_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Derived_sequence]
+    # Use Ancestral_sequence (patched per-row by edit_ancestral_sequence) rather than
+    # Consensus_sequence so that same-locus variants with different ancestral amino acids
+    # each get the correct ancestral translation.
+    df[!, :Ancestral_AA_sequence] = [translate_dna_to_protein(seq) for seq in df.Ancestral_sequence]
+    df[!, :Derived_AA_sequence]   = [translate_dna_to_protein(seq) for seq in df.Derived_sequence]
     return df
 end
 

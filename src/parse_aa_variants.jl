@@ -178,7 +178,15 @@ function main()
         exit(1)
     end
 
-    # Build variants, forcing canonical codons regardless of consensus
+    # Build variants, forcing canonical codons regardless of consensus.
+    # Track the ancestral codon written into frames for each locus so we can warn when
+    # multiple records at the same locus carry different ancestral amino acids (e.g.
+    # reversals like I->L and L->I, or multi-ancestral sets like I->K / T->I / K->T).
+    # The frame can only hold one codon per position, so later records overwrite earlier
+    # ones; generate_peptides.jl now handles this by patching ancestral on a per-row
+    # basis from the Consensus column in variants.csv.
+    locus_ancestral = Dict{Int, String}()  # locus => canonical ancestral codon first seen
+
     out = DataFrame(Locus=Int[], Consensus=String[], Variant=String[])
 
     for rec in records
@@ -243,6 +251,21 @@ function main()
 
         # Absolute nucleotide locus (start of the codon in genome coordinates)
         locus = start_pos + rel_nt - 1
+
+        # Warn when multiple records share a locus with different ancestral amino acids.
+        # Only the last ancestral codon written here will persist in frames.csv, but
+        # generate_peptides.jl now patches each row's ancestral sequence independently
+        # from the Consensus column in variants.csv, so all variants are handled correctly.
+        if haskey(locus_ancestral, locus) && locus_ancestral[locus] != ancestral_codon
+            prev = locus_ancestral[locus]
+            prev_aa = get(CODON_DICT, prev, "?")
+            @warn "Same-locus multi-ancestral variant at locus $locus ($(rec.orf_name) AA $(rec.aa_pos)): " *
+                  "previously saw ancestral codon '$prev' ($prev_aa), now '$(ancestral_codon)' ($(rec.ancestral_aa)). " *
+                  "This is expected for reversals or multi-ancestral sets. " *
+                  "frames.csv will carry the last-written codon ('$(ancestral_codon)'); " *
+                  "generate_peptides.jl will patch each variant's ancestral codon independently."
+        end
+        locus_ancestral[locus] = ancestral_codon
 
         push!(out, (locus, ancestral_codon, derived_codon))
         println("  $(rec.orf_name) AA $(rec.aa_pos): $(rec.ancestral_aa)→$(rec.derived_aa) | codon $ancestral_codon→$derived_codon | locus $locus")
