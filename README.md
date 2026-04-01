@@ -203,6 +203,7 @@ These options allow multiple independent analyses (e.g. observed vs. simulated) 
 - `best_ranks.csv`: Per-allele best EL ranks for ancestral and derived peptides at each locus.
 - `harmonic_mean_best_ranks.csv`: Harmonic mean best ranks (HMBR) and log2 fold changes aggregated across the panel (`Frame`, `Locus`, `Mutation`, `HMBR_A`, `HMBR_D`, `foldchange_HMBR`, `log2_foldchange_HMBR`).
 - `per_allele_best_ranks.csv`: Per-allele eluted ligand best ranks and log2 fold changes for every allele in the genome, filtered to ancestral EL rank ≤ 2% (`Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`). Written when `--per-allele` is passed to `run` or `run_supertype`.
+- `variant_fates.csv`: One row per entry in `variants.csv` with a `fate` column recording where in the pipeline each variant was filtered (or whether it survived). Values: `out_of_frame`, `synonymous`, `stop_codon`, `non_binding`, or `passed`. Written at the end of `run` and `run_supertype`.
 - `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results (produced by `simulate` + `run`).
 - `per_allele_best_ranks_simulated.csv`: Per-allele results for simulated variants (produced by `simulate` + `run --per-allele`).
 - `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with `Percentile`, `Z_i`, and `p_value` columns relative to the simulated distribution, plus `combined_z` (Stouffer's Z, mean percentile, one-tailed p-value) and `empirical_p` (empirical p-value from 99999 random k-samples) summary rows.

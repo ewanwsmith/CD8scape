@@ -371,6 +371,12 @@ elseif command == "run"
         exit(1)
     end
 
+    # Variant Fates
+    local fates_cmd = `julia --startup-file=no --project=. src/variant_fates.jl $folder_path`
+    if suffix != ""; fates_cmd = `$fates_cmd --suffix $suffix`; end
+    if latest; fates_cmd = `$fates_cmd --latest`; else fates_cmd = `$fates_cmd --no-latest`; end
+    safe_run(fates_cmd) || println("Warning: variant_fates.jl did not complete successfully.")
+
     println("Run stage finished successfully.")
 
 # Process "run_supertype" command
@@ -504,6 +510,12 @@ elseif command == "run_supertype"
         println("Error running src/process_best_ranks.jl")
         exit(1)
     end
+
+    # Variant Fates
+    local fates_cmd = `julia --startup-file=no --project=. src/variant_fates.jl $folder_path`
+    if suffix != ""; fates_cmd = `$fates_cmd --suffix $suffix`; end
+    if latest; fates_cmd = `$fates_cmd --latest`; else fates_cmd = `$fates_cmd --no-latest`; end
+    safe_run(fates_cmd) || println("Warning: variant_fates.jl did not complete successfully.")
 
     println("run_supertype method finished successfully.")
 
