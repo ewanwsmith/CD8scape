@@ -124,7 +124,7 @@ end
 # Process "prep" command
 if command == "prep"
     # Setup environment
-    if !safe_run(`julia --project=. src/env.jl`)
+    if !safe_run(`julia --startup-file=no --project=. src/env.jl`)
         println("Error running src/env.jl")
         exit(1)
     end
@@ -144,13 +144,13 @@ elseif command == "read"
     variants_csv_path = resolve_write(joinpath(folder_path, "variants.csv"); suffix=suffix)
 
     # Read frames (NCBI first, then Samfire fallback)
-    local read_ncbi_cmd = `julia --project=. src/read_ncbi_frames.jl $folder_path`
+    local read_ncbi_cmd = `julia --startup-file=no --project=. src/read_ncbi_frames.jl $folder_path`
     if suffix != ""; read_ncbi_cmd = `$read_ncbi_cmd --suffix $suffix`; end
     if latest; read_ncbi_cmd = `$read_ncbi_cmd --latest`; else read_ncbi_cmd = `$read_ncbi_cmd --no-latest`; end
     ncbi_success = safe_run(read_ncbi_cmd)
     if !ncbi_success || !isfile(frames_csv_path)
         println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
-        local read_sam_cmd = `julia --project=. src/read_samfire_frames.jl $folder_path`
+        local read_sam_cmd = `julia --startup-file=no --project=. src/read_samfire_frames.jl $folder_path`
         if suffix != ""; read_sam_cmd = `$read_sam_cmd --suffix $suffix`; end
         if latest; read_sam_cmd = `$read_sam_cmd --latest`; else read_sam_cmd = `$read_sam_cmd --no-latest`; end
         samfire_success = safe_run(read_sam_cmd)
@@ -164,7 +164,7 @@ elseif command == "read"
     parse_ok = false
     if use_aa
         # --aa flag: parse amino-acid-level variants from a .aa file
-        local parse_aa_cmd = `julia --project=. src/parse_aa_variants.jl $folder_path`
+        local parse_aa_cmd = `julia --startup-file=no --project=. src/parse_aa_variants.jl $folder_path`
         if suffix != ""; parse_aa_cmd = `$parse_aa_cmd --suffix $suffix`; end
         if latest; parse_aa_cmd = `$parse_aa_cmd --latest`; else parse_aa_cmd = `$parse_aa_cmd --no-latest`; end
         parse_ok = safe_run(parse_aa_cmd)
@@ -175,7 +175,7 @@ elseif command == "read"
         # Prefer VCF if present, otherwise trajectories
         vcf_files = filter(f -> endswith(f, ".vcf") || endswith(f, ".vcf.gz"), readdir(folder_path; join=true))
         if !isempty(vcf_files)
-            local parse_vcf_cmd = `julia --project=. src/parse_vcf.jl $folder_path`
+            local parse_vcf_cmd = `julia --startup-file=no --project=. src/parse_vcf.jl $folder_path`
             if suffix != ""; parse_vcf_cmd = `$parse_vcf_cmd --suffix $suffix`; end
             parse_ok = safe_run(parse_vcf_cmd)
             if !parse_ok
@@ -183,7 +183,7 @@ elseif command == "read"
             end
         end
         if !parse_ok
-            local parse_traj_cmd = `julia --project=. src/parse_trajectories.jl $folder_path`
+            local parse_traj_cmd = `julia --startup-file=no --project=. src/parse_trajectories.jl $folder_path`
             if suffix != ""; parse_traj_cmd = `$parse_traj_cmd --suffix $suffix`; end
             parse_ok = safe_run(parse_traj_cmd)
         end
@@ -213,13 +213,13 @@ elseif command == "simulate"
     frames_csv_path = resolve_write(joinpath(folder_path, "frames.csv"); suffix=suffix)
 
     # Try NCBI frame reading first
-    local read_ncbi_cmd = `julia --project=. src/read_ncbi_frames.jl $folder_path`
+    local read_ncbi_cmd = `julia --startup-file=no --project=. src/read_ncbi_frames.jl $folder_path`
     if suffix != ""; read_ncbi_cmd = `$read_ncbi_cmd --suffix $suffix`; end
     if latest; read_ncbi_cmd = `$read_ncbi_cmd --latest`; else read_ncbi_cmd = `$read_ncbi_cmd --no-latest`; end
     ncbi_success = safe_run(read_ncbi_cmd)
     if !ncbi_success || !isfile(frames_csv_path)
         println("read_ncbi_frames.jl failed or frames.csv not found. Trying read_samfire_frames.jl instead.")
-        local read_sam_cmd = `julia --project=. src/read_samfire_frames.jl $folder_path`
+        local read_sam_cmd = `julia --startup-file=no --project=. src/read_samfire_frames.jl $folder_path`
         if suffix != ""; read_sam_cmd = `$read_sam_cmd --suffix $suffix`; end
         if latest; read_sam_cmd = `$read_sam_cmd --latest`; else read_sam_cmd = `$read_sam_cmd --no-latest`; end
         samfire_success = safe_run(read_sam_cmd)
@@ -230,7 +230,7 @@ elseif command == "simulate"
     end
 
     # Forward extra arguments to simulate_variants.jl
-    local sim_cmd = `julia --project=. src/simulate_variants.jl $folder_path`
+    local sim_cmd = `julia --startup-file=no --project=. src/simulate_variants.jl $folder_path`
     for arg in extra_args
         sim_cmd = `$sim_cmd $arg`
     end
@@ -269,7 +269,7 @@ elseif command == "run"
     skip_marker = joinpath(folder_path, ".cd8scape_skipped")
 
     # Generate Peptides
-        local gen_cmd = `julia --project=. src/generate_peptides.jl $folder_path`
+        local gen_cmd = `julia --startup-file=no --project=. src/generate_peptides.jl $folder_path`
         if suffix != ""; gen_cmd = `$gen_cmd --suffix $suffix`; end
         if latest; gen_cmd = `$gen_cmd --latest`; else gen_cmd = `$gen_cmd --no-latest`; end
         if !safe_run(gen_cmd)
@@ -278,7 +278,7 @@ elseif command == "run"
     end
 
     # Clean Peptides
-    if !safe_run(`julia --project=. src/clean_peptides.jl $folder_path`)
+    if !safe_run(`julia --startup-file=no --project=. src/clean_peptides.jl $folder_path`)
         println("Error running src/clean_peptides.jl")
         exit(1)
     end
@@ -299,7 +299,7 @@ elseif command == "run"
     end
 
     # Run NetMHCpan
-    local run_cmd = `julia --project=. src/run_netMHCpan.jl --folder $folder_path`
+    local run_cmd = `julia --startup-file=no --project=. src/run_netMHCpan.jl --folder $folder_path`
     for t in threads_arg
         run_cmd = `$run_cmd $t`
     end
@@ -353,7 +353,7 @@ elseif command == "run"
     end
 
     # Process Scores
-    local scores_cmd = `julia --project=. src/process_scores.jl --folder $folder_path`
+    local scores_cmd = `julia --startup-file=no --project=. src/process_scores.jl --folder $folder_path`
     if suffix != ""; scores_cmd = `$scores_cmd --suffix $suffix`; end
     if latest; scores_cmd = `$scores_cmd --latest`; else scores_cmd = `$scores_cmd --no-latest`; end
     if !safe_run(scores_cmd)
@@ -362,7 +362,7 @@ elseif command == "run"
     end
 
     # Process Best Ranks
-    local ranks_cmd = `julia --project=. src/process_best_ranks.jl $folder_path`
+    local ranks_cmd = `julia --startup-file=no --project=. src/process_best_ranks.jl $folder_path`
     if suffix != ""; ranks_cmd = `$ranks_cmd --suffix $suffix`; end
     if latest; ranks_cmd = `$ranks_cmd --latest`; else ranks_cmd = `$ranks_cmd --no-latest`; end
     if per_allele; ranks_cmd = `$ranks_cmd --per-allele`; end
@@ -404,7 +404,7 @@ elseif command == "run_supertype"
     skip_marker = joinpath(folder_path, ".cd8scape_skipped")
 
     # Generate Peptides
-    local gen_cmd = `julia --project=. src/generate_peptides.jl $folder_path`
+    local gen_cmd = `julia --startup-file=no --project=. src/generate_peptides.jl $folder_path`
     if suffix != ""; gen_cmd = `$gen_cmd --suffix $suffix`; end
     if latest; gen_cmd = `$gen_cmd --latest`; else gen_cmd = `$gen_cmd --no-latest`; end
     if !safe_run(gen_cmd)
@@ -413,7 +413,7 @@ elseif command == "run_supertype"
     end
 
     # Clean Peptides
-    if !safe_run(`julia --project=. src/clean_peptides.jl $folder_path`)
+    if !safe_run(`julia --startup-file=no --project=. src/clean_peptides.jl $folder_path`)
         println("Error running src/clean_peptides.jl")
         exit(1)
     end
@@ -434,7 +434,7 @@ elseif command == "run_supertype"
     end
 
     # Run NetMHCpan
-    local run_cmd = `julia --project=. src/run_netMHCpan_global.jl --folder $folder_path`
+    local run_cmd = `julia --startup-file=no --project=. src/run_netMHCpan_global.jl --folder $folder_path`
     for t in threads_arg
         run_cmd = `$run_cmd $t`
     end
@@ -487,7 +487,7 @@ elseif command == "run_supertype"
     end
 
     # Process Scores
-    local scores_cmd = `julia --project=. src/process_scores.jl --folder $folder_path`
+    local scores_cmd = `julia --startup-file=no --project=. src/process_scores.jl --folder $folder_path`
     if suffix != ""; scores_cmd = `$scores_cmd --suffix $suffix`; end
     if latest; scores_cmd = `$scores_cmd --latest`; else scores_cmd = `$scores_cmd --no-latest`; end
     if !safe_run(scores_cmd)
@@ -496,7 +496,7 @@ elseif command == "run_supertype"
     end
 
     # Process Best Ranks
-    local ranks_cmd = `julia --project=. src/process_best_ranks.jl $folder_path`
+    local ranks_cmd = `julia --startup-file=no --project=. src/process_best_ranks.jl $folder_path`
     if suffix != ""; ranks_cmd = `$ranks_cmd --suffix $suffix`; end
     if latest; ranks_cmd = `$ranks_cmd --latest`; else ranks_cmd = `$ranks_cmd --no-latest`; end
     if per_allele; ranks_cmd = `$ranks_cmd --per-allele`; end
@@ -537,7 +537,7 @@ elseif command == "percentile"
     forward = _parse_s_o(extra_args)
     per_allele = any(a -> a == "--per-allele", extra_args)
 
-    local pct_cmd = `julia --project=. src/percentile.jl $folder_path`
+    local pct_cmd = `julia --startup-file=no --project=. src/percentile.jl $folder_path`
     for f in forward
         pct_cmd = `$pct_cmd $f`
     end
