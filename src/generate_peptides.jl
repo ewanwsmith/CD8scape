@@ -203,36 +203,63 @@ function check_locus(df::DataFrame)::DataFrame
     for row in eachrow(df)
         ref = String(row.Consensus)
         alt = String(row.Variant)
-        r, a, prefix_trim = normalize_variant(ref, alt)
-        adj = row.Locus + prefix_trim
-        # Compute Relative_Locus from adjusted position
-        rl = adj - row.Start + 1
-        # If ref does not match at the adjusted position, try to find nearby match
-        ref_match = false
-        if 1 ≤ rl && rl + length(r) - 1 ≤ length(row.Consensus_sequence)
-            ref_match = row.Consensus_sequence[rl:(rl + length(r) - 1)] == r
-        end
-        if !ref_match
-            # allow a small number of mismatches to tolerate minor ref discrepancies
-            new_rl, ok = find_ref_match(row.Consensus_sequence, r, rl; window=10, max_mismatch=1)
-            if ok
-                adj = row.Start + new_rl - 1
-                rl = new_rl
-                if 1 ≤ rl && rl + length(r) - 1 ≤ length(row.Consensus_sequence)
-                    r = row.Consensus_sequence[rl:(rl + length(r) - 1)]
+
+        # Before normalizing, check whether the FULL original ref matches the consensus
+        # at the given locus.  normalize_variant trims shared suffix/prefix, potentially
+        # reducing a 3-nt codon to a single nucleotide.  If the frame has been overwritten
+        # by a later same-locus variant (last-write-wins), find_ref_match will then locate
+        # that single nucleotide at the WRONG codon position (or accept a mismatch via
+        # max_mismatch=1), corrupting the variant into a synonymous or mislabelled change.
+        # By checking the full ref first we can skip normalization and ref-searching
+        # entirely for overwritten loci, trusting the locus and codon from variants.csv
+        # instead.  edit_ancestral_sequence then patches the ancestral sequence per-row.
+        orig_rl       = row.Locus - row.Start + 1
+        full_ref_len  = length(ref)
+        full_ref_ok   = (1 ≤ orig_rl &&
+                         orig_rl + full_ref_len - 1 ≤ length(row.Consensus_sequence) &&
+                         row.Consensus_sequence[orig_rl:(orig_rl + full_ref_len - 1)] == ref)
+
+        r, a, adj, rl, ref_match = if full_ref_ok
+            # Normal path: normalize the variant (trim shared suffix/prefix) and
+            # optionally realign with find_ref_match for minor ref discrepancies.
+            rn, an, prefix_trim = normalize_variant(ref, alt)
+            adjn  = row.Locus + prefix_trim
+            rln   = adjn - row.Start + 1
+            rn_match = (1 ≤ rln &&
+                        rln + length(rn) - 1 ≤ length(row.Consensus_sequence) &&
+                        row.Consensus_sequence[rln:(rln + length(rn) - 1)] == rn)
+            if !rn_match
+                new_rln, ok = find_ref_match(row.Consensus_sequence, rn, rln;
+                                             window=10, max_mismatch=1)
+                if ok
+                    adjn = row.Start + new_rln - 1
+                    rln  = new_rln
+                    if 1 ≤ rln && rln + length(rn) - 1 ≤ length(row.Consensus_sequence)
+                        rn = row.Consensus_sequence[rln:(rln + length(rn) - 1)]
+                    end
+                    rn_match = true
+                else
+                    ref_len = length(rn)
+                    if 1 ≤ rln && rln + ref_len - 1 ≤ length(row.Consensus_sequence)
+                        rn = row.Consensus_sequence[rln:(rln + ref_len - 1)]
+                        rn_match = true
+                        @warn "Reference allele mismatch at Locus $(row.Locus). Normalizing REF to consensus sequence."
+                    end
                 end
-                ref_match = true
-            else
-                # Do NOT overwrite r with the consensus here.  When multiple variants share
-                # the same locus (e.g. reversals or multi-ancestral sets), parse_aa_variants
-                # writes each ancestral codon into frames sequentially, so the last write
-                # wins.  Replacing r with whatever the consensus now says would corrupt
-                # earlier variants into synonymous (or wrong) changes.  Instead, trust the
-                # ref carried in variants.csv and let edit_ancestral_sequence patch the
-                # correct ancestral codon into the sequence on a per-row basis.
-                @warn "Reference allele mismatch at Locus $(row.Locus): REF '$(r)' not found in consensus. Using REF from variants.csv as-is (may indicate a same-locus multi-ancestral variant)."
             end
+            (rn, an, adjn, rln, rn_match)
+        else
+            # The full ref does not match at this locus — the frame was likely overwritten
+            # by a later same-locus variant.  Skip normalization and find_ref_match to
+            # avoid false positives, and use the original locus + full ref/alt from
+            # variants.csv.  edit_ancestral_sequence will patch the correct ancestral codon.
+            @warn "Reference allele mismatch at Locus $(row.Locus): " *
+                  "REF '$(ref)' not found in consensus at relative position $(orig_rl) " *
+                  "(same-locus multi-ancestral variant — frame overwritten by a later record). " *
+                  "Using variants.csv ref and locus as-is."
+            (ref, alt, row.Locus, orig_rl, false)
         end
+
         push!(norm_ref, r)
         push!(norm_alt, a)
         push!(adjusted_locus, adj)
