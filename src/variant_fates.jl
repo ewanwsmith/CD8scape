@@ -3,27 +3,18 @@
 variant_fates.jl
 
 Traces each variant in variants.csv through the pipeline's filtering stages and
-writes variant_fates.csv in long format with columns:
+writes variant_fates.csv in wide format with columns:
 
-  Frame     - protein / region label  (matches harmonic_mean_best_ranks.csv)
-  Locus     - genomic position
-  Mutation  - amino-acid change label (e.g. A17T, K50*, del100atg)
-  source    - upstream pipeline node
-  target    - downstream pipeline node
+  Frame          - protein / region label  (matches harmonic_mean_best_ranks.csv)
+  Locus          - genomic position
+  Mutation       - amino-acid change label (e.g. A17T, K50*, del100atg)
+  frame_filter   - "In frame" | "Out of frame"
+  peptide_filter - "Non-synonymous" | "Synonymous" | "Stop codon" | missing
+  binding_filter - "Passed" | "Non-binding" | missing
 
-Each variant produces one row per stage it reaches.  Aggregating by
-(source, target) and counting gives the link values for a Sankey diagram.
-
-Stage nodes:
-  Input          → Out of frame | In frame
-  In frame       → Synonymous   | Stop codon | Non-synonymous
-  Non-synonymous → Non-binding  | Passed
-
-For variants that passed the binding filter, Frame and Mutation are taken
-directly from harmonic_mean_best_ranks.csv (one set of journey rows is
-emitted per (Frame, Mutation) entry at that Locus).  For variants filtered
-earlier, Frame is the first matching reading frame and Mutation is derived
-from translation.
+One row is emitted per variant (or per (Frame, Mutation) entry in
+harmonic_mean_best_ranks.csv when a locus appears in multiple ORFs).
+Adjacent stage columns give the source→target pairs needed for a Sankey diagram.
 
 Called automatically at the end of `run` and `run_supertype`.
 
@@ -61,7 +52,6 @@ translate_dna(seq::String) =
 
 Returns (fate_class, mutation_label) where fate_class is one of
 "synonymous", "stop_codon", or "viable".
-Indel labels use genomic_locus to match the convention in harmonic_mean_best_ranks.csv.
 """
 function classify_and_label(consensus_seq::String, ref_nt::String, alt_nt::String,
                              rel_locus::Int, genomic_locus::Int)
@@ -78,20 +68,16 @@ function classify_and_label(consensus_seq::String, ref_nt::String, alt_nt::Strin
     is_indel = length(ref_nt) != length(alt_nt)
     aa_pos   = ceil(Int, rel_locus / 3)
 
-    # Build mutation label
     mutation = if is_indel
-        if length(ref_nt) > length(alt_nt)
-            "del$(genomic_locus)$(lowercase(ref_nt[(length(alt_nt)+1):end]))"
-        else
+        length(ref_nt) > length(alt_nt) ?
+            "del$(genomic_locus)$(lowercase(ref_nt[(length(alt_nt)+1):end]))" :
             "ins$(genomic_locus)$(lowercase(alt_nt[(length(ref_nt)+1):end]))"
-        end
     else
         anc_c = aa_pos <= length(anc_aa) ? string(anc_aa[aa_pos]) : "?"
         der_c = aa_pos <= length(der_aa) ? string(der_aa[aa_pos]) : "?"
         "$(anc_c)$(aa_pos)$(der_c)"
     end
 
-    # Classification: stop codon introduced / moved earlier?
     anc_stop = findfirst(==('*'), anc_aa)
     der_stop = findfirst(==('*'), der_aa)
     if der_stop !== nothing && (anc_stop === nothing || der_stop < anc_stop)
@@ -101,7 +87,6 @@ function classify_and_label(consensus_seq::String, ref_nt::String, alt_nt::Strin
     anc_aa == der_aa ? ("synonymous", mutation) : ("viable", mutation)
 end
 
-# Fate priority used when a variant maps to multiple frames with different fates
 const FATE_RANK = Dict("synonymous"=>0, "stop_codon"=>1, "viable"=>2)
 
 function main()
@@ -126,7 +111,7 @@ function main()
     frames[!, :Start] = [parse(Int, split(split(r, ";")[1],   ",")[1]) for r in frames.Region]
     frames[!, :End]   = [parse(Int, split(split(r, ";")[end], ",")[2]) for r in frames.Region]
 
-    # Build locus → [(Frame, Mutation)] lookup from HMBR for passed variants
+    # Build locus → [(Frame, Mutation)] from HMBR (one entry per passing ORF)
     hmbr_by_locus = Dict{Int, Vector{NamedTuple{(:Frame,:Mutation),Tuple{String,String}}}}()
     hmbr_path = resolve_read(joinpath(folder_path, "harmonic_mean_best_ranks.csv");
                              suffix=suffix, latest=latest)
@@ -140,17 +125,16 @@ function main()
                 "binding-filter survivors will be marked Non-binding.")
     end
 
-    # Accumulate output columns
     col_frame    = Union{String,Missing}[]
     col_locus    = Int[]
     col_mutation = Union{String,Missing}[]
-    col_source   = String[]
-    col_target   = String[]
+    col_stage1   = String[]                      # frame_filter
+    col_stage2   = Union{String,Missing}[]       # peptide_filter
+    col_stage3   = Union{String,Missing}[]       # binding_filter
 
-    function emit!(frame, locus, mutation, source, target)
-        push!(col_frame, frame); push!(col_locus, locus)
-        push!(col_mutation, mutation)
-        push!(col_source, source); push!(col_target, target)
+    function push_row!(frame, locus, mutation, s1, s2, s3)
+        push!(col_frame, frame); push!(col_locus, locus); push!(col_mutation, mutation)
+        push!(col_stage1, s1);   push!(col_stage2, s2);   push!(col_stage3, s3)
     end
 
     for var_row in eachrow(variants)
@@ -161,21 +145,19 @@ function main()
         matching = filter(f -> f.Start <= locus <= f.End, frames)
 
         if isempty(matching)
-            emit!(missing, locus, missing, "Input", "Out of frame")
+            push_row!(missing, locus, missing, "Out of frame", missing, missing)
             continue
         end
 
-        # Variants in HMBR passed the binding filter; emit one journey per (Frame, Mutation)
+        # Passed binding filter — one row per (Frame, Mutation) in HMBR
         if haskey(hmbr_by_locus, locus)
             for e in hmbr_by_locus[locus]
-                emit!(e.Frame, locus, e.Mutation, "Input",          "In frame")
-                emit!(e.Frame, locus, e.Mutation, "In frame",       "Non-synonymous")
-                emit!(e.Frame, locus, e.Mutation, "Non-synonymous", "Passed")
+                push_row!(e.Frame, locus, e.Mutation, "In frame", "Non-synonymous", "Passed")
             end
             continue
         end
 
-        # Not in HMBR — classify from translation, take most favourable frame fate
+        # Classify from translation; take most favourable fate across matching frames
         best_class    = "synonymous"
         best_mutation = ""
         best_frame    = String(matching[1, :Description])
@@ -183,33 +165,32 @@ function main()
         for f in eachrow(matching)
             rel = locus - f.Start + 1
             fc, mut = classify_and_label(String(f.Consensus_sequence), ref, alt, rel, locus)
-            rank = get(FATE_RANK, fc, 0)
-            if rank > get(FATE_RANK, best_class, 0)
-                best_class    = fc
-                best_mutation = mut
-                best_frame    = String(f.Description)
+            if get(FATE_RANK, fc, 0) > get(FATE_RANK, best_class, 0)
+                best_class = fc; best_mutation = mut; best_frame = String(f.Description)
             elseif best_mutation == ""
-                best_mutation = mut
-                best_frame    = String(f.Description)
+                best_mutation = mut; best_frame = String(f.Description)
             end
         end
 
-        if best_class == "viable"
-            # Reached binding filter but didn't pass
-            emit!(best_frame, locus, best_mutation, "Input",          "In frame")
-            emit!(best_frame, locus, best_mutation, "In frame",       "Non-synonymous")
-            emit!(best_frame, locus, best_mutation, "Non-synonymous", "Non-binding")
+        s2, s3 = if best_class == "viable"
+            "Non-synonymous", "Non-binding"
         elseif best_class == "stop_codon"
-            emit!(best_frame, locus, best_mutation, "Input",    "In frame")
-            emit!(best_frame, locus, best_mutation, "In frame", "Stop codon")
+            "Stop codon", missing
         else
-            emit!(best_frame, locus, best_mutation, "Input",    "In frame")
-            emit!(best_frame, locus, best_mutation, "In frame", "Synonymous")
+            "Synonymous", missing
         end
+
+        push_row!(best_frame, locus, best_mutation, "In frame", s2, s3)
     end
 
-    result = DataFrame(Frame=col_frame, Locus=col_locus, Mutation=col_mutation,
-                       source=col_source, target=col_target)
+    result = DataFrame(
+        Frame          = col_frame,
+        Locus          = col_locus,
+        Mutation       = col_mutation,
+        frame_filter   = col_stage1,
+        peptide_filter = col_stage2,
+        binding_filter = col_stage3,
+    )
     out_path = resolve_write(joinpath(folder_path, "variant_fates.csv"); suffix=suffix)
     CSV.write(out_path, result)
     println("variant_fates.csv written to $out_path ($(nrow(result)) rows)")
