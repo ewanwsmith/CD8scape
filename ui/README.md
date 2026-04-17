@@ -1,30 +1,56 @@
-# CD8scape UI — Phase 1
+# CD8scape UI — Phases 1 & 2
 
-A minimal, cross-platform graphical launcher for CD8scape. Phase 1 focuses
-on **one thing only**: proving we can safely run CD8scape from a UI on
-macOS, Linux, and Windows, and stream its logs live.
+A minimal, cross-platform graphical launcher for CD8scape.
 
-Later phases will add file pickers, parameter controls, result viewers,
-and polish. See the project plan for the phase-by-phase roadmap.
+- **Phase 1 (shipped):** cross-platform subprocess launch + live log stream.
+- **Phase 2 (shipped):** pick your data folder, validate it, then run the
+  `read` stage.
+- **Phase 3+ (planned):** parameter controls, results viewer, polish.
 
 ---
 
-## What Phase 1 does
+## Design principle — the UI is a wrapper, nothing more
 
-- A single-page Streamlit app with:
-  - one **Run CD8scape** button
-  - a live log panel (stdout + stderr, merged and streamed)
-  - a **success / failure** banner when the run ends
-- Hardcoded invocation: `CD8scape.jl --help`
-  - Exercises the full launch path without requiring netMHCpan or
-    any Julia packages to be installed.
+The UI renders CLI arguments as UI controls, spawns `julia CD8scape.jl …`,
+and streams the output. It deliberately does **not** know anything about
+CD8scape's input files, output files, or pipeline logic. If CD8scape's
+internals change, this UI keeps working unchanged.
 
-## What Phase 1 deliberately does NOT do
+Consequences, in practice:
 
-- No file pickers
-- No parameter controls
-- No results viewer
-- No configuration saving
+- The folder picker checks only that the path exists and is a directory.
+  Discovery of variant files, reading-frame files, etc. is entirely up to
+  CD8scape.
+- Every toggle, textbox and dropdown in the UI is a 1:1 mirror of a
+  CD8scape CLI flag.
+- Errors shown to the user come from CD8scape itself (the log panel),
+  not from a parallel validator in the UI.
+
+## What the UI currently does
+
+- A three-section Streamlit page:
+  1. **Choose your data folder.** Text input (drag-and-drop from Finder /
+     File Explorer works). A **Check folder** button does a basic
+     filesystem sanity check and — on success — shows a read-only listing
+     of the folder's contents. No interpretation.
+  2. **Options.** Checkboxes/inputs that map directly onto CD8scape CLI
+     flags. Phase 2 ships with one: `--aa`.
+  3. **Run CD8scape.** Invokes `CD8scape.jl read <folder> [--aa]` through
+     a cross-platform subprocess. Stdout and stderr stream into a live log
+     panel, followed by a green / red banner and the exit code.
+- The sidebar shows OS, Python version, the repo root, and the exact
+  `argv` list that will be spawned.
+
+## What the UI deliberately does NOT do
+
+- No duplication of CD8scape's file-discovery logic.
+- No auto-setting of CLI flags based on folder contents — that's the
+  user's call.
+- No CLI parameters beyond `read` + `--aa` yet (threads, suffix,
+  per-allele, other subcommands). Those arrive in Phase 3.
+- No results viewer — Phase 4 will render the CSVs inline.
+- No run cancellation. Phase 5 will add a Cancel button and progress bar.
+- No config save/load.
 
 ---
 
@@ -36,8 +62,9 @@ and polish. See the project plan for the phase-by-phase roadmap.
 | Julia | 1.11+ | Required by CD8scape itself. Install from <https://julialang.org/downloads/>. |
 | Streamlit | 1.32+ | Installed via `requirements.txt`. |
 
-You do **not** need `netMHCpan` or Perl installed to run the Phase 1 smoke
-test — `--help` does not touch them. You will need them for later phases.
+For Phase 2's `read` stage you need Julia and the CD8scape Julia packages
+installed (run `./CD8scape.jl prep` once from a terminal before using the UI).
+You do **not** need `netMHCpan` or Perl until Phase 3's run stages.
 
 ---
 
@@ -90,8 +117,9 @@ a green success banner.
 Useful for CI and for debugging before touching Streamlit:
 
 ```bash
-python ui/runner.py            # runs `CD8scape.jl --help`
+python ui/runner.py                          # runs `CD8scape.jl --help`
 python ui/runner.py read data/Example_data --aa
+python ui/paths.py data/Example_data         # UI-only folder sanity check
 ```
 
 Exit codes:
@@ -129,13 +157,26 @@ spelling out.
    CD8scape's relative `include(...)` calls resolve identically to how
    they do when a user runs it manually.
 
-## Known limitations (by design, for Phase 1)
+## Folder check — what it actually does
 
-- Only the hardcoded `--help` command can be run from the UI.
-- The sidebar only shows the resolved command — it doesn't offer to
-  edit it (that's Phase 3).
+The UI's **Check folder** button only answers filesystem questions:
+
+- Did you enter something?
+- Does it exist?
+- Is it a directory?
+
+If so, it shows a plain listing of what's in the folder as a convenience.
+It does **not** classify files or decide what CD8scape will do with them.
+That's CD8scape's job, and if CD8scape can't use the folder it will say
+so in the run log.
+
+## Known limitations
+
+- The Run button currently invokes the `read` stage only. The other
+  CD8scape commands (`simulate`, `run`, `run_supertype`, `percentile`)
+  arrive in Phase 3.
+- No CLI parameters (thread count, suffix, `--per-allele`, etc.) yet.
 - Log lines are rendered into a single code block; very long runs
-  (thousands of lines) will be slow to redraw. Phase 4/5 will add a
-  virtualised log viewer if needed.
+  (thousands of lines) can be slow to redraw.
 - Closing the browser tab does not cancel a running subprocess yet;
   Phase 5 will add explicit cancellation.
