@@ -37,4 +37,7 @@ src/settings.txt
 
 # macOS Finder metadata
 .DS_Store
-**/.DS_Store
+**/.DS_Store.claude/
+.test_write
+setup_shell.sh
+test/
