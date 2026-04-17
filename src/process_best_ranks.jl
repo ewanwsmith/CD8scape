@@ -66,66 +66,186 @@ if abspath(PROGRAM_FILE) == @__FILE__
     suffix, latest, per_allele = _parse_suffix_latest(ARGS[2:end])
 
     input_file = resolve_read(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix, latest=latest)
-    println("Reading input file: $input_file")
 
-    # Read the input CSV into a DataFrame with error handling
+    # -------------------------------------------------------------------------
+    # Memory-safe, fast streaming read
+    # -------------------------------------------------------------------------
+    # The processed_peptides.csv file can grow to hundreds of millions of rows
+    # for supertype (panel) runs over large segments (e.g. ~530M rows for HA
+    # simulated on the 2078-allele human panel). Loading the whole file into a
+    # DataFrame requires 20–30 GB of RAM and OOMs.
+    #
+    # Instead, we stream the CSV row-by-row with `CSV.Rows` and accumulate the
+    # running minimum `EL_Rank` per `(Locus, MHC, Mutation)` group for the
+    # ancestral (`_A`) and derived (`_D`) peptide types simultaneously. Peak
+    # memory is proportional to the number of unique groups (~millions) rather
+    # than the number of rows (~hundreds of millions).
+    #
+    # Performance notes — critical to avoid the ~20× slowdown of naive
+    # `CSV.Rows`:
+    #   * `types=...` lets CSV.jl parse Locus/EL_Rank as Int/Float64 natively,
+    #     skipping per-row String→number allocations.
+    #   * `reusebuffer=true` reuses the row object across iterations.
+    #   * `parse_label` is a hand-written parser (no regex, no Regex.replace
+    #     per row) that recovers `(mutation, frame)` from `Peptide_label`.
+    #   * MHC / Mutation / Frame are interned through a shared String pool
+    #     so the dict's string memory stays O(unique values), not O(groups).
+    #
+    # Dict value layout: (best_EL_Rank::Float64, frame::String, sequence::String)
+    println("Reading input file: $input_file")
+    println("Streaming CSV to compute per-(Locus,MHC,Mutation) best ranks...")
+
+    GroupKey  = Tuple{Int,String,String}            # (Locus, MHC, Mutation)
+    GroupVal  = Tuple{Float64,String,String}        # (best_EL_Rank, Frame, Sequence)
+    best_A_dict = Dict{GroupKey, GroupVal}()
+    best_D_dict = Dict{GroupKey, GroupVal}()
+
+    # String interning pool — many rows share the same MHC/Mutation/Frame.
+    # Storing a single canonical `String` per distinct value caps memory.
+    string_pool = Dict{String,String}()
+    @inline intern(s::AbstractString) = begin
+        k = String(s)
+        get!(string_pool, k, k)
+    end
+
+    # Fast, allocation-light parser for `Peptide_label`. Expected shape:
+    #     "<mutation>_<...>_<frame>_<digits>_<A|C|D|V>"
+    # Returns (mutation, frame) as `SubString` views into `label` when
+    # possible, avoiding an intermediate `String` allocation.
+    @inline function parse_label(label::AbstractString)
+        L = lastindex(label)
+        # Strip trailing "_[A|C|D|V]"
+        if L >= 2 && label[prevind(label, L)] == '_'
+            c = label[L]
+            if c == 'A' || c == 'C' || c == 'D' || c == 'V'
+                L = prevind(label, L, 2)
+            end
+        end
+        # Strip trailing "_<digits>"
+        j = L
+        seen_digit = false
+        while j > 0 && isdigit(label[j])
+            seen_digit = true
+            j = prevind(label, j)
+        end
+        if seen_digit && j > 0 && label[j] == '_'
+            L = prevind(label, j)
+        end
+        # mutation = prefix before first '_'
+        p1 = findnext(==('_'), label, firstindex(label))
+        mut = p1 === nothing || p1 > L ? SubString(label, firstindex(label), L) :
+                                         SubString(label, firstindex(label), prevind(label, p1))
+        # frame = suffix after last '_' in [1:L]
+        p2 = findprev(==('_'), label, L)
+        frm = p2 === nothing ? SubString(label, firstindex(label), L) :
+                               SubString(label, nextind(label, p2), L)
+        return mut, frm
+    end
+
+    # Specify types so CSV.jl parses natively (big speedup vs default lazy
+    # strings-only). We still tolerate missing/NA via `missingstring=...`.
+    col_types = Dict(
+        :Locus         => Int,
+        :EL_Rank       => Float64,
+        :Peptide_label => String,
+        :MHC           => String,
+        :Peptide       => String,
+    )
+
+    row_count = 0
+    processed_count = 0
     try
-        global df = CSV.read(input_file, DataFrame)
-        println("Successfully loaded data with $(nrow(df)) rows")
+        for row in CSV.Rows(input_file;
+                            reusebuffer   = true,
+                            types         = col_types,
+                            missingstring = ["", "NA"])
+            row_count += 1
+
+            # --- Classify peptide type by label suffix (ancestral / derived) ----
+            plabel = row.Peptide_label
+            plabel === missing && continue
+            is_A = endswith(plabel, "_A")
+            is_D = endswith(plabel, "_D")
+            (is_A || is_D) || continue
+
+            # --- Usable numeric fields? -----------------------------------------
+            er = row.EL_Rank
+            er === missing && continue
+            (isnan(er) || er <= 0) && continue
+            loc = row.Locus
+            loc === missing && continue
+
+            # --- Derive mutation + frame (no regex, no String allocs here) ------
+            mut_sv, frm_sv = parse_label(plabel)
+            mutation    = intern(mut_sv)
+            frame_label = intern(frm_sv)
+            mhc         = intern(row.MHC)
+
+            # Peptide sequences are highly variable → don't intern (pool bloat).
+            sequence = String(row.Peptide)
+
+            key    = (loc, mhc, mutation)
+            target = is_A ? best_A_dict : best_D_dict
+            existing = get(target, key, nothing)
+            if existing === nothing || er < existing[1]
+                target[key] = (er, frame_label, sequence)
+            end
+
+            processed_count += 1
+            if row_count % 10_000_000 == 0
+                println("  $(row_count ÷ 1_000_000)M rows scanned "
+                        * "($(processed_count) retained, "
+                        * "$(length(best_A_dict))+$(length(best_D_dict)) groups)")
+            end
+        end
     catch e
-        println("Error reading input file: $e")
+        println("Error streaming input file: $e")
         exit(1)
     end
+    println("Successfully processed $(row_count) rows "
+            * "($(processed_count) passed filters, "
+            * "$(length(best_A_dict)) ancestral groups, "
+            * "$(length(best_D_dict)) derived groups)")
 
-# Function to find minimum EL_Rank by Locus, MHC, and AA change for given peptide pattern
-function find_best_ranks(df, pattern)
-    subset = filter(row -> !ismissing(row.Peptide_label) && endswith(row.Peptide_label, pattern), df)
-    if isempty(subset)
-        println("Warning: No peptides found for pattern '$pattern'")
-        return DataFrame(Locus = Int[], MHC = String[], Change = String[], Best_EL_Rank = Float64[], Peptide_Type = String[], Description = String[], Sequence = String[])
+    # -------------------------------------------------------------------------
+    # Convert accumulated dicts into DataFrames matching the downstream schema.
+    # Memory here is bounded by the number of unique groups (already reduced).
+    # -------------------------------------------------------------------------
+    function dict_to_df(d::Dict, peptide_type::String)
+        n = length(d)
+        Loci  = Vector{Int}(undef, n);       MHCs      = Vector{String}(undef, n)
+        Muts  = Vector{String}(undef, n);    Ranks     = Vector{Float64}(undef, n)
+        Types = fill(peptide_type, n);       Frames    = Vector{String}(undef, n)
+        Seqs  = Vector{String}(undef, n)
+        i = 1
+        for ((loc, mhc, mut), (rank, frm, seq)) in d
+            Loci[i]   = loc;   MHCs[i]   = mhc;   Muts[i]  = mut
+            Ranks[i]  = rank;  Frames[i] = frm;   Seqs[i]  = seq
+            i += 1
+        end
+        return DataFrame(
+            Locus        = Loci,
+            MHC          = MHCs,
+            Mutation     = Muts,
+            Best_EL_Rank = Ranks,
+            Peptide_Type = Types,
+            Frame        = Frames,
+            Sequence     = Seqs,
+        )
     end
-    # Coerce EL_Rank column to Float64 if not already
-    if !(eltype(subset.EL_Rank) <: AbstractFloat)
-        subset.EL_Rank = map(x -> try
-            x isa Number ? float(x) : parse(Float64, String(x))
-        catch
-            NaN
-        end, subset.EL_Rank)
-    end
-    # Derive AA change key from Peptide_label (e.g., "A17T" from "A17T_ProteinName_3_ D")
-    change_keys = replace.(subset.Peptide_label, r"_(C|V|A|D)$" => "")
-    change_keys = replace.(change_keys, r"_\d+$" => "")
-    change_keys = replace.(change_keys, ' ' => '_')
-    subset[!, :Mutation] = String.(first.(split.(change_keys, "_")))
 
-    grouped = groupby(subset, [:Locus, :MHC, :Mutation])
-    best_rows = combine(grouped) do sdf
-        idx = argmin(sdf.EL_Rank)
-          raw_desc = String(sdf.Peptide_label[idx])
-          cleaned = replace(raw_desc, r"_(C|V|A|D)$" => "")
-          cleaned = replace(cleaned, r"_\d+$" => "")
-          cleaned = replace(cleaned, ' ' => '_')
-          # Frame is the last part after underscores
-          parts = split(cleaned, "_")
-          frame = parts[end]
-          (; Best_EL_Rank = sdf.EL_Rank[idx],
-              Frame = frame,
-              Sequence = sdf.Peptide[idx])
-    end
-    return best_rows
-end
-
-# Find best ranks separately for ancestral (_A, legacy _C) and derived (_D, legacy _V) peptides
-    println("Calculating best ranks for ancestral peptides (_A)...")
-    best_C = find_best_ranks(df, "_A")
-    best_C.Peptide_Type .= "A"
+    println("Materialising best ranks for ancestral peptides (_A)...")
+    best_C = dict_to_df(best_A_dict, "A")
     println("Found best ranks for ancestral peptides: $(nrow(best_C)) entries")
 
-    println("Calculating best ranks for derived peptides (_D)...")
-    best_V = find_best_ranks(df, "_D")
-    best_V.Peptide_Type .= "D"
+    println("Materialising best ranks for derived peptides (_D)...")
+    best_V = dict_to_df(best_D_dict, "D")
     println("Found best ranks for derived peptides: $(nrow(best_V)) entries")
 
+    # Free the accumulator dicts early; everything we need now lives in the
+    # small-ish best_C / best_V DataFrames. Help the GC reclaim the pools.
+    empty!(best_A_dict); empty!(best_D_dict); empty!(string_pool)
+    GC.gc()
 
 # Combine ancestral and derived results
     best_ranks = vcat(best_C, best_V)
