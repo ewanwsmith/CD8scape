@@ -155,6 +155,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
     row_count = 0
     processed_count = 0
     try
+        # The streaming loop lives at top level inside `if abspath(PROGRAM_FILE)
+        # == @__FILE__ ... end`, which is soft scope. Without this `global`
+        # declaration Julia treats `row_count`/`processed_count` as new locals
+        # shadowing the outer globals, so `row_count += 1` reads an
+        # uninitialised local and throws `UndefVarError(:row_count, :local)`.
+        global row_count, processed_count
         for row in CSV.Rows(input_file;
                             reusebuffer   = true,
                             types         = col_types,
