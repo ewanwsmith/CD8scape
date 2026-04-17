@@ -1,11 +1,13 @@
-# CD8scape UI — Phases 1 & 2
+# CD8scape UI — Phases 1 · 2 · 3
 
 A minimal, cross-platform graphical launcher for CD8scape.
 
 - **Phase 1 (shipped):** cross-platform subprocess launch + live log stream.
-- **Phase 2 (shipped):** pick your data folder, validate it, then run the
-  `read` stage.
-- **Phase 3+ (planned):** parameter controls, results viewer, polish.
+- **Phase 2 (shipped):** pick your data folder; the UI checks only that
+  the path is a folder and forwards everything to CD8scape.
+- **Phase 3 (shipped):** full CLI surface (all six subcommands, every flag)
+  exposed as UI controls that are 1:1 mirrors of CD8scape's `--help`.
+- **Phase 4+ (planned):** results viewer, polish.
 
 ---
 
@@ -28,26 +30,46 @@ Consequences, in practice:
 
 ## What the UI currently does
 
-- A three-section Streamlit page:
-  1. **Choose your data folder.** Text input (drag-and-drop from Finder /
+- A four-section Streamlit page:
+  1. **Choose a CD8scape command.** Dropdown listing every subcommand in
+     `./CD8scape.jl --help`: `prep`, `read`, `simulate`, `run`,
+     `run_supertype`, `percentile`. A short description is shown below it.
+  2. **Choose your data folder.** Text input (drag-and-drop from Finder /
      File Explorer works). A **Check folder** button does a basic
      filesystem sanity check and — on success — shows a read-only listing
-     of the folder's contents. No interpretation.
-  2. **Options.** Checkboxes/inputs that map directly onto CD8scape CLI
-     flags. Phase 2 ships with one: `--aa`.
-  3. **Run CD8scape.** Invokes `CD8scape.jl read <folder> [--aa]` through
-     a cross-platform subprocess. Stdout and stderr stream into a live log
-     panel, followed by a green / red banner and the exit code.
+     of the folder's contents. No interpretation. This section is hidden
+     for `prep`, which takes no folder.
+  3. **Options.** Controls that map directly onto the CLI flags of the
+     selected subcommand. The set of controls changes with the command.
+  4. **Run CD8scape.** Invokes `julia CD8scape.jl <command> [<folder>]
+     [flags…]` through a cross-platform subprocess. Stdout and stderr
+     stream into a live log panel, followed by a green / red banner and
+     the exit code.
 - The sidebar shows OS, Python version, the repo root, and the exact
   `argv` list that will be spawned.
+
+## CLI ↔ UI mapping
+
+| Command          | UI controls (all are direct mirrors of CLI flags) |
+|------------------|---------------------------------------------------|
+| `prep`           | — (no options) |
+| `read`           | `--aa` checkbox · `--suffix` text · `--latest`/`--no-latest` radio |
+| `simulate`       | sampling radio (all / `--n` / `--p`) · `--seed` number · `--suffix` (default *simulated*) · `--latest`/`--no-latest` radio |
+| `run`            | `--t` number or `--t max` checkbox · `--per-allele` · `--verbose` · `--suffix` · `--latest`/`--no-latest` |
+| `run_supertype`  | same as `run` |
+| `percentile`     | `--per-allele` · `--s` text (simulated file) · `--o` text (observed file) |
+
+The UI does not interpret what these flags do; it simply assembles them
+into an argv list and hands the whole thing to CD8scape. The "Next
+command" block in the sidebar always shows the full argv that will be
+executed, so you can see the translation for yourself before clicking
+Run.
 
 ## What the UI deliberately does NOT do
 
 - No duplication of CD8scape's file-discovery logic.
 - No auto-setting of CLI flags based on folder contents — that's the
   user's call.
-- No CLI parameters beyond `read` + `--aa` yet (threads, suffix,
-  per-allele, other subcommands). Those arrive in Phase 3.
 - No results viewer — Phase 4 will render the CSVs inline.
 - No run cancellation. Phase 5 will add a Cancel button and progress bar.
 - No config save/load.
