@@ -1,0 +1,4 @@
+# UI-only Python dependencies for CD8scape.
+# Kept deliberately tiny — Phase 1 only needs Streamlit.
+# Pins use >= so users on macOS/Linux/Windows can resolve a wheel.
+streamlit>=1.32,<2.0

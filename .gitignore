@@ -32,6 +32,10 @@ Manifest.toml
 # Ignore Python virtual environments
 .venv/
 
+# Python bytecode caches
+__pycache__/
+*.pyc
+
 # Ignore local settings file
 src/settings.txt
 
