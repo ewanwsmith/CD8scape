@@ -329,20 +329,34 @@ elseif command == "run"
     # Continue regardless of number of lines; downstream scripts will handle empty outputs
 
     # Process Output with Perl Script
+    #
+    # NOTE (memory): Stream the Perl script's stdout straight to disk instead of
+    # buffering the entire output in RAM via `read(..., String)`. For large
+    # NetMHCpan outputs (e.g. ~10 GB) the processed CSV is similarly large, and
+    # materialising it as a single Julia string causes an OOM crash.
     try
-        perl_output = read(`perl src/process_output.pl $netmhcpan_output`, String)
-        open(processed_output, "w") do f
-            write(f, perl_output)
-        end
+        run(pipeline(`perl src/process_output.pl $netmhcpan_output`, stdout = processed_output))
     catch e
         println("Error running src/process_output.pl: $e")
         exit(1)
     end
 
-    # If processed_output has no data rows, skip remaining stages gracefully
+    # If processed_output has no data rows, skip remaining stages gracefully.
+    # Avoid readlines() here (also buffers the whole file); instead count newlines
+    # while streaming.
     try
-        lines = readlines(processed_output)
-        data_rows = length(lines) > 1 ? (length(lines) - 1) : 0
+        data_rows = 0
+        open(processed_output, "r") do io
+            # Skip header line if present
+            isheader = !eof(io)
+            isheader && readline(io)
+            while !eof(io)
+                readline(io)
+                data_rows += 1
+                # Early exit: once we know there is data, stop counting.
+                data_rows >= 1 && break
+            end
+        end
         if data_rows == 0
             println("Skipping downstream processing: processed_output has 0 data rows.")
             println("Run stage finished successfully (no data).")
@@ -463,20 +477,32 @@ elseif command == "run_supertype"
     end
 
     # Process Output with Perl Script
+    #
+    # NOTE (memory): Stream the Perl script's stdout straight to disk instead of
+    # buffering the entire output in RAM via `read(..., String)`. For the
+    # supertype panel (~2000 HLA alleles) the processed CSV can reach tens of GB,
+    # so materialising it as a single Julia string causes an OOM crash.
     try
-        perl_output = read(`perl src/process_output.pl $netmhcpan_output`, String)
-        open(processed_output, "w") do f
-            write(f, perl_output)
-        end
+        run(pipeline(`perl src/process_output.pl $netmhcpan_output`, stdout = processed_output))
     catch e
         println("Error running src/process_output.pl: $e")
         exit(1)
     end
 
-    # If processed_output has no data rows, skip remaining stages gracefully
+    # If processed_output has no data rows, skip remaining stages gracefully.
+    # Avoid readlines() here (also buffers the whole file); stream instead.
     try
-        lines = readlines(processed_output)
-        data_rows = length(lines) > 1 ? (length(lines) - 1) : 0
+        data_rows = 0
+        open(processed_output, "r") do io
+            isheader = !eof(io)
+            isheader && readline(io)
+            while !eof(io)
+                readline(io)
+                data_rows += 1
+                # Early exit: once we know there is data, stop counting.
+                data_rows >= 1 && break
+            end
+        end
         if data_rows == 0
             println("Skipping downstream processing: processed_output has 0 data rows.")
             println("run_supertype method finished successfully (no data).")
