@@ -14,6 +14,7 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
 - Perl 5
 - Julia v1.11+
 - [netMHCpan 4.2](https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/) (4.1 also supported)
+- Python 3.8+ and PyQt6 (desktop app only — PyQt6 is installed automatically on first launch)
 
 ## Installation
 1. Clone the repository:
@@ -31,6 +32,25 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
    ./CD8scape.jl prep
    ```
    This activates the project environment, installs required Julia packages, validates the netMHCpan path, and checks that Perl is available.
+
+## Desktop app
+
+CD8scape includes a graphical desktop app as an alternative to the command-line interface.
+
+**Launch:**
+- **macOS**: double-click `launch.command` in Finder. A Terminal window opens while the app is running.
+- **Windows**: double-click `launch.bat`.
+
+PyQt6 is installed automatically into your Python environment the first time you run the launcher.
+
+The app is a step-by-step wizard:
+
+1. **Setup** — enter your netMHCpan path, verify Perl is available, and install Julia dependencies. This replaces steps 2–3 of the command-line installation above and only needs to be done once per machine.
+2. **Data** — choose an example dataset or point to your own data folder.
+3. **Prepare** — select input type (nucleotide or amino acid) and any advanced options.
+4. **Run** — select analysis type (individual genotype, supertype panel, or percentile benchmarking) and options.
+5. **Execute** — run the pipeline and watch the output live.
+6. **Output** — browse, open, or delete the files produced by the run.
 
 ## Input Data
 
