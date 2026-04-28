@@ -2068,6 +2068,15 @@ class OutputPage(QWidget):
         )
         _mono.setPointSize(11)
         self._preview_text.setFont(_mono)
+        self._preview_text.setStyleSheet(
+            "QTextEdit {"
+            "  background-color: #ffffff;"
+            "  color: #1d1d1f;"
+            "  border: 1px solid #d1d1d6;"
+            "  border-radius: 7px;"
+            "  font-size: 12px;"
+            "}"
+        )
         self._preview_stack.addWidget(self._preview_text)
 
         self._preview_stack.setCurrentIndex(1)   # start on text pane
