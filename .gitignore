@@ -32,12 +32,66 @@ Manifest.toml
 # Ignore Python virtual environments
 .venv/
 
+# Python bytecode caches
+__pycache__/
+*.pyc
+
 # Ignore local settings file
 src/settings.txt
 
 # macOS Finder metadata
 .DS_Store
-**/.DS_Store.claude/
+**/.DS_Store
+
+# Claude / Cowork session files
+.claude/
+
+# CD8scape pipeline output — generated files that live alongside input data.
+# Input files (sequences.fasta, Consensus.fa, alleles.txt, .out, .aa, etc.) are tracked;
+# everything produced by read / simulate / run / run_supertype / percentile is not.
+
+# Parsed inputs
+data/**/variants*.csv
+data/**/frames*.csv
+
+# Peptide generation
+data/**/Peptides*.pep
+data/**/peptides_labels*.csv
+data/**/processed_peptides*.csv
+
+# netMHCpan raw output (both capitalisation variants)
+data/**/netMHCpan_output*.tsv
+data/**/netmhcpan_output*.tsv
+
+# Scoring / binding
+data/**/processed_output*.csv
+data/**/processed_scores*.csv
+data/**/best_ranks*.csv
+
+# Fold-change summaries
+data/**/harmonic_mean_best_ranks*.csv
+data/**/per_allele_best_ranks*.csv
+
+# Percentile results
+data/**/percentile_*.csv
+
+# Variant fates
+data/**/variant_fates*.csv
+
+# Supertype panel intermediates
+data/**/supertype_panel_squished.csv
+data/**/squishing_map.csv
+
+# Temporary files written during a run (cleaned up on success, visible on failure)
+data/**/_temp_*
+data/**/test_write.txt
+
+# Julia serialisation cache
+data/**/results_cache.jls
+
+# Legacy / scratch
 .test_write
-setup_shell.sh
-test/
+
+# macOS / Windows temp files
+*.dmg
+*.tmp

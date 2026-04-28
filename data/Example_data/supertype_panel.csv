@@ -1,3 +1,5 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:dabc270672cc7c5f13087866b5f9deeb177735072e38828fc72bcf94a171970d
-size 103
+Locus,Allele,Frequency
+A,HLA-A*01:01,0.288
+A,HLA-A*02:01,0.114
+B,HLA-B*07:02,0.210
+C,HLA-C*07:02,0.140
