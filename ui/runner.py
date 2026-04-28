@@ -25,12 +25,20 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional  # Optional kept for RunResult
 
 
-# Absolute path to the CD8scape repository root (one level above /ui).
+# ---------------------------------------------------------------------------
+# Repo root resolution
+# ---------------------------------------------------------------------------
+
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 CD8SCAPE_SCRIPT: Path = REPO_ROOT / "CD8scape.jl"
+
+
+def get_repo_root() -> Path:
+    """Return the CD8scape repository root (parent of ui/)."""
+    return REPO_ROOT
 
 
 @dataclass
@@ -61,11 +69,13 @@ def find_julia() -> str:
           on Windows and ``julia`` on macOS/Linux without any OS-specific code.
         * We do NOT rely on the shebang line in CD8scape.jl, because Windows
           does not honour shebangs.
+        * The launcher (.command / .bat) inherits the user's shell PATH, so
+          juliaup, Homebrew, and conda installations are all visible here.
     """
     julia = shutil.which("julia")
     if julia is None:
         raise JuliaNotFoundError(
-            "The 'julia' executable was not found on your PATH. "
+            "The 'julia' executable was not found on your PATH.\n\n"
             "Install Julia 1.11+ from https://julialang.org/downloads/ "
             "and make sure the 'julia' command works in a new terminal."
         )
@@ -73,14 +83,15 @@ def find_julia() -> str:
 
 
 def check_cd8scape_script() -> Path:
-    """Confirm that CD8scape.jl exists next to the ui/ folder."""
-    if not CD8SCAPE_SCRIPT.is_file():
+    """Confirm that CD8scape.jl exists in the configured repo root."""
+    root = get_repo_root()
+    script = root / "CD8scape.jl"
+    if not script.is_file():
         raise CD8scapeNotFoundError(
-            f"Could not find CD8scape.jl at {CD8SCAPE_SCRIPT}. "
-            "The UI must live inside the CD8scape repository, "
-            "in a folder called 'ui/' next to CD8scape.jl."
+            f"Could not find CD8scape.jl at {script}.\n\n"
+            "Please check the CD8scape Repository path in Setup."
         )
-    return CD8SCAPE_SCRIPT
+    return script
 
 
 def build_command(cd8scape_args: List[str]) -> List[str]:
@@ -119,7 +130,7 @@ def stream_cd8scape(cd8scape_args: List[str]) -> Iterator[str]:
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        cwd=str(REPO_ROOT),
+        cwd=str(get_repo_root()),
         text=True,
         encoding="utf-8",
         errors="replace",
