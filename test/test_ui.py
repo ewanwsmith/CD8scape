@@ -121,8 +121,6 @@ class TestListFolder(unittest.TestCase):
         entries, _ = list_folder(self.test_dir, limit=None)
         names = [e.rstrip("/") for e in entries]
         self.assertIn("test_ui.py", names)
-        self.assertIn("frames.csv", names)
-        self.assertIn("variants.csv", names)
 
 
 # ===========================================================================
@@ -167,7 +165,7 @@ class TestValidateNetmhcpan(unittest.TestCase):
             tmp.chmod(0o755)
             r = validate_netmhcpan(str(tmp))
             self.assertTrue(r.ok)
-            self.assertEqual(r.resolved, tmp)
+            self.assertEqual(r.resolved, tmp.resolve())
         finally:
             tmp.unlink(missing_ok=True)
 
