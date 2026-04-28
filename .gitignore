@@ -91,7 +91,6 @@ data/**/results_cache.jls
 
 # Legacy / scratch
 .test_write
-test/
 
 # macOS / Windows temp files
 *.dmg
