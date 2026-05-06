@@ -131,13 +131,40 @@ FRAME_ABBREVS: Dict[str, str] = {
     "endoRNAse":                    "endoRNAse",
 }
 
-# Viridis-sampled palette (covers up to 20 reading frames)
+# Viridis control points — 20 samples used as anchors for interpolation.
+# _viridis_hex(t) below gives a smooth colour at any t ∈ [0, 1].
 _VIRIDIS_HEX = [
     "#440154", "#46085c", "#470d60", "#481769", "#482273",
     "#472d7b", "#453882", "#414287", "#3d4d8a", "#38578c",
     "#33618d", "#2e6b8e", "#29758e", "#257f8e", "#218a8d",
     "#1d948a", "#1a9e86", "#1fa87f", "#2db27d", "#41bc77",
 ]
+
+
+def _viridis_hex(t: float) -> str:
+    """Return a viridis hex colour at fractional position t ∈ [0, 1].
+
+    Linearly interpolates between the 20 control points so any number
+    of variants can be coloured with exactly 1/n steps between them,
+    without rounding errors or colour repetition.
+    """
+    t = max(0.0, min(1.0, t))
+    v = _VIRIDIS_HEX
+    scaled = t * (len(v) - 1)
+    lo = int(scaled)
+    hi = min(lo + 1, len(v) - 1)
+    frac = scaled - lo
+
+    def _parse(h: str) -> Tuple[int, int, int]:
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    r0, g0, b0 = _parse(v[lo])
+    r1, g1, b1 = _parse(v[hi])
+    r = int(r0 + frac * (r1 - r0))
+    g = int(g0 + frac * (g1 - g0))
+    b = int(b0 + frac * (b1 - b0))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 # HLA-locus palette (approximates viridis mako)
 LOCUS_COLORS: Dict[str, str] = {
@@ -194,12 +221,14 @@ def _frame_order_and_colors(
                 min_locus[f] = locus
     order = sorted(min_locus, key=lambda f: min_locus[f])
     n = len(order)
-    palette = _VIRIDIS_HEX[:n] if n <= len(_VIRIDIS_HEX) else (
-        _VIRIDIS_HEX * (n // len(_VIRIDIS_HEX) + 1)
-    )[:n]
-    frame_colors = dict(zip(order, palette))
+    # Frame colours: evenly interpolated across viridis (1/n steps)
+    frame_colors = {
+        f: _viridis_hex(i / max(1, n - 1))
+        for i, f in enumerate(order)
+    }
 
-    # Per-mutation colours when all data is in one frame
+    # Per-mutation colours when all data is in one frame:
+    # each mutation gets a colour at exactly i/nm through the palette.
     mutation_colors: Dict[str, str] = {}
     if n <= 1:
         muts: List[str] = []
@@ -211,9 +240,10 @@ def _frame_order_and_colors(
                 muts.append(m)
         nm = len(muts)
         if nm > 0:
-            v = _VIRIDIS_HEX
-            indices = [round(i * (len(v) - 1) / max(1, nm - 1)) for i in range(nm)]
-            mutation_colors = {m: v[idx] for m, idx in zip(muts, indices)}
+            mutation_colors = {
+                m: _viridis_hex(i / max(1, nm - 1))
+                for i, m in enumerate(muts)
+            }
 
     return order, frame_colors, mutation_colors
 
