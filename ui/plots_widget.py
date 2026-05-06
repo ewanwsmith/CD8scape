@@ -44,6 +44,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -173,8 +174,17 @@ def _find_file(folder: Path, stem: str, suffix: str) -> Optional[Path]:
 
 def _frame_order_and_colors(
     rows: List[Dict],
-) -> Tuple[List[str], Dict[str, str]]:
-    """Return (frame_order, {frame: hex_color}), ordered by minimum locus."""
+) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
+    """
+    Return (frame_order, frame_colors, mutation_colors).
+
+    frame_colors   maps frame  → hex color (one viridis colour per frame).
+    mutation_colors maps mutation → hex color, populated only when all rows
+                   share a single frame — each mutation gets its own colour
+                   spread evenly across the full viridis palette.
+    When multiple frames are present, mutation_colors is empty and callers
+    should colour by frame.
+    """
     min_locus: Dict[str, float] = {}
     for r in rows:
         f = r.get("Frame", "")
@@ -187,7 +197,25 @@ def _frame_order_and_colors(
     palette = _VIRIDIS_HEX[:n] if n <= len(_VIRIDIS_HEX) else (
         _VIRIDIS_HEX * (n // len(_VIRIDIS_HEX) + 1)
     )[:n]
-    return order, dict(zip(order, palette))
+    frame_colors = dict(zip(order, palette))
+
+    # Per-mutation colours when all data is in one frame
+    mutation_colors: Dict[str, str] = {}
+    if n <= 1:
+        muts: List[str] = []
+        seen: set = set()
+        for r in rows:
+            m = r.get("Mutation", "")
+            if m and m not in seen:
+                seen.add(m)
+                muts.append(m)
+        nm = len(muts)
+        if nm > 0:
+            v = _VIRIDIS_HEX
+            indices = [round(i * (len(v) - 1) / max(1, nm - 1)) for i in range(nm)]
+            mutation_colors = {m: v[idx] for m, idx in zip(muts, indices)}
+
+    return order, frame_colors, mutation_colors
 
 
 def _mutations_by_frame(
@@ -237,7 +265,7 @@ def _style_plot(p: "pg.PlotItem", title: str = "") -> None:
     p.getAxis("left").setTextPen(pg.mkPen("#333333"))
     p.showGrid(x=False, y=True, alpha=0.12)
     # Mouse interaction is disabled per-ViewBox; zoom/pan is handled by
-    # the outer _ZoomableGLW scene transform.
+    # the outer _ZoomScrollArea handles zoom/pan at the pane level.
     p.getViewBox().setMouseMode(pg.ViewBox.PanMode)
 
 
@@ -247,7 +275,8 @@ def _build_escape_scores(
     rows: List[Dict],
     frame_order: List[str],
     frame_colors: Dict[str, str],
-) -> "pg.GraphicsLayoutWidget":
+    mutation_colors: Dict[str, str] = {},
+) -> "_PassthroughGLW":
     """
     Bar chart: log₂ fold-change in HMBR per mutation, faceted by frame.
     All mutations shown; dashed line at 0.
@@ -261,7 +290,7 @@ def _build_escape_scores(
               for r in rows if _safe_float(r.get("log2_foldchange_HMBR", "")) is not None]
     y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
 
-    glw = _ZoomableGLW()
+    glw = _PassthroughGLW()
     glw.setBackground("#f5f5f7")
 
     first_plot = None
@@ -280,21 +309,30 @@ def _build_escape_scores(
         # Proportional column widths
         glw.ci.layout.setColumnStretchFactor(col_i, max(1, n))
 
-        color_hex = frame_colors.get(frame, "#440154")
-        rgba = _hex_to_rgba(color_hex, 210)
-
         heights = np.array([
             _safe_float(r.get("log2_foldchange_HMBR", "")) or 0.0
             for r in mutations
         ])
         x = np.arange(n, dtype=float)
 
-        bars = pg.BarGraphItem(
-            x=x, height=heights, width=0.65,
-            brush=pg.mkBrush(*rgba),
-            pen=pg.mkPen(None),
-        )
-        p.addItem(bars)
+        if mutation_colors:
+            # Single-frame run: one viridis colour per mutation
+            for i, r in enumerate(mutations):
+                c_hex = mutation_colors.get(r.get("Mutation", ""), "#440154")
+                bar = pg.BarGraphItem(
+                    x=np.array([x[i]]), height=np.array([heights[i]]),
+                    width=0.65,
+                    brush=pg.mkBrush(*_hex_to_rgba(c_hex, 210)),
+                    pen=pg.mkPen(None),
+                )
+                p.addItem(bar)
+        else:
+            color_hex = frame_colors.get(frame, "#440154")
+            p.addItem(pg.BarGraphItem(
+                x=x, height=heights, width=0.65,
+                brush=pg.mkBrush(*_hex_to_rgba(color_hex, 210)),
+                pen=pg.mkPen(None),
+            ))
 
         # y = 0 dashed line
         zero = pg.InfiniteLine(
@@ -326,7 +364,8 @@ def _build_percentile_scores(
     obs_rows: List[Dict],
     sim_rows: List[Dict],
     frame_colors: Dict[str, str],
-) -> "pg.GraphicsLayoutWidget":
+    mutation_colors: Dict[str, str] = {},
+) -> "_PassthroughGLW":
     """
     One density panel per mutation (all mutations with valid data),
     showing the simulated null KDE with the observed log₂FC marked.
@@ -365,7 +404,7 @@ def _build_percentile_scores(
     y_full = _gaussian_kde(sim_vals, x_full)
     y_max = float(y_full.max())
 
-    glw = _ZoomableGLW()
+    glw = _PassthroughGLW()
     glw.setBackground("#f5f5f7")
 
     for idx, r in enumerate(candidates):
@@ -384,7 +423,10 @@ def _build_percentile_scores(
         p.getViewBox().setMouseEnabled(x=False, y=False)
         p.setTitle(title, color="#1d1d1f", size="8pt")
 
-        color_hex = frame_colors.get(frame, "#440154")
+        if mutation_colors:
+            color_hex = mutation_colors.get(mutation, "#440154")
+        else:
+            color_hex = frame_colors.get(frame, "#440154")
         rgba = _hex_to_rgba(color_hex, 180)
 
         # Window the density near the observed value
@@ -429,7 +471,8 @@ def _build_per_allele_scatter(
     pa_rows: List[Dict],
     frame_order: List[str],
     frame_colors: Dict[str, str],
-) -> "pg.GraphicsLayoutWidget":
+    mutation_colors: Dict[str, str] = {},
+) -> "_PassthroughGLW":
     """
     Scatter: per-allele log₂ fold-change per mutation, faceted by frame,
     coloured by HLA locus (A / B / C).
@@ -460,7 +503,7 @@ def _build_per_allele_scatter(
 
     rng = np.random.default_rng(42)
 
-    glw = _ZoomableGLW()
+    glw = _PassthroughGLW()
     glw.setBackground("#f5f5f7")
 
     first_plot = None
@@ -558,7 +601,7 @@ def _build_per_allele_box(pa_rows: List[Dict]) -> "pg.GraphicsLayoutWidget":
     all_fc = [r["fc"] for r in enriched]
     y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
 
-    glw = _ZoomableGLW()
+    glw = _PassthroughGLW()
     glw.setBackground("#f5f5f7")
     p = glw.addPlot(row=0, col=0, axisItems={"bottom": _RotatedAxisItem()})
     _style_plot(p)
@@ -685,77 +728,152 @@ class _RotatedAxisItem(pg.AxisItem):
                 p.restore()
 
 
-# ── Pane-level zoom/pan container ─────────────────────────────────────────────
+# ── Scroll + zoom container ───────────────────────────────────────────────────
 
-class _ZoomableGLW(pg.GraphicsLayoutWidget):
+class _PassthroughGLW(pg.GraphicsLayoutWidget):
     """
-    GraphicsLayoutWidget where the scroll wheel zooms the *entire* scene
-    rather than individual sub-plot ViewBoxes.
-
-    All ViewBoxes inside should have setMouseEnabled(False) so they don't
-    swallow wheel or drag events.
+    GraphicsLayoutWidget that ignores wheel events so they propagate up
+    to the parent _ZoomScrollArea instead of being swallowed by pyqtgraph.
+    All ViewBoxes inside should also have setMouseEnabled(False).
     """
-    _MIN_ZOOM = 0.15
-    _MAX_ZOOM = 6.0
+    def wheelEvent(self, ev):
+        ev.ignore()   # bubble up to the QScrollArea parent
 
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self._cur_zoom = 1.0
-        from PyQt6.QtWidgets import QGraphicsView
-        self.setTransformationAnchor(
-            QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setResizeAnchor(
-            QGraphicsView.ViewportAnchor.AnchorViewCenter)
+
+class _ZoomScrollArea(QScrollArea):
+    """
+    QScrollArea holding a _PassthroughGLW.
+
+    • Two-finger trackpad scroll  → pan  (QScrollArea native behaviour)
+    • Ctrl + scroll               → zoom (resize the inner GLW)
+    • +/− buttons in _make_panel → zoom via zoom_in() / zoom_out()
+    """
+    _MIN_ZOOM = 0.25
+    _MAX_ZOOM = 5.0
+
+    def __init__(self, glw: "_PassthroughGLW", base_height: int = 420):
+        super().__init__()
+        self._glw = glw
+        self._base_height = base_height
+        self._zoom = 1.0
+        self._initialised = False
+        self.setWidget(glw)
+        self.setWidgetResizable(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+
+    # ── size management ──────────────────────────────────────────
+    def _apply_zoom(self, z: float) -> None:
+        self._zoom = max(self._MIN_ZOOM, min(self._MAX_ZOOM, z))
+        vp_w = max(200, self.viewport().width())
+        new_w = max(vp_w, int(vp_w * self._zoom))
+        new_h = max(self._base_height, int(self._base_height * self._zoom))
+        self._glw.setFixedSize(new_w, new_h)
+
+    def zoom_level(self) -> float:
+        return self._zoom
+
+    def zoom_in(self)    -> None: self._apply_zoom(self._zoom * 1.3)
+    def zoom_out(self)   -> None: self._apply_zoom(self._zoom / 1.3)
+    def zoom_reset(self) -> None: self._apply_zoom(1.0)
+
+    # ── Qt events ───────────────────────────────────────────────
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        if not self._initialised:
+            self._initialised = True
+            self._apply_zoom(1.0)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        if self._initialised:
+            self._apply_zoom(self._zoom)   # keep ratio on window resize
 
     def wheelEvent(self, ev):
-        dy = ev.angleDelta().y()
-        if dy == 0:
-            # Horizontal trackpad scroll → let Qt pan normally
-            from PyQt6.QtWidgets import QGraphicsView
-            QGraphicsView.wheelEvent(self, ev)
-            return
-        factor = 1.13 if dy > 0 else 1.0 / 1.13
-        new_zoom = max(self._MIN_ZOOM,
-                       min(self._MAX_ZOOM, self._cur_zoom * factor))
-        self.scale(new_zoom / self._cur_zoom, new_zoom / self._cur_zoom)
-        self._cur_zoom = new_zoom
-        ev.accept()
+        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            factor = 1.13 if ev.angleDelta().y() > 0 else 1.0 / 1.13
+            self._apply_zoom(self._zoom * factor)
+            ev.accept()
+        else:
+            super().wheelEvent(ev)         # default: scroll the area
 
 
 # ── Panel wrapper (plot widget + save button) ─────────────────────────────────
 
 def _make_panel(
-    pg_widget: "pg.GraphicsLayoutWidget",
+    pg_widget: "_PassthroughGLW",
     save_stem: str,
-    hint: str = "Scroll to zoom · Drag to pan",
+    base_height: int = 420,
 ) -> QWidget:
     """
-    Wrap a pyqtgraph widget in a container with a hint label and Save button.
+    Wrap a _PassthroughGLW in a scroll area with zoom controls and a save button.
+
+    Interaction:
+      Scroll (two-finger trackpad)  → pan the plot
+      Ctrl + scroll                 → zoom in / out
+      +  /  −  buttons              → zoom in / out
     """
     panel = QWidget()
     vbox = QVBoxLayout(panel)
     vbox.setContentsMargins(0, 0, 0, 0)
-    vbox.setSpacing(4)
+    vbox.setSpacing(0)
 
-    # Controls row
+    # ── Controls row ─────────────────────────────────────────────
     ctrl = QHBoxLayout()
-    ctrl.setContentsMargins(8, 4, 8, 2)
+    ctrl.setContentsMargins(8, 4, 8, 4)
 
-    hint_lbl = QLabel(hint)
+    hint_lbl = QLabel("Scroll to pan · Ctrl+scroll or ＋/－ to zoom")
     hint_lbl.setObjectName("lbl_info")
     hint_lbl.setStyleSheet("font-size: 11px; color: #8e8e93;")
 
+    zoom_out_btn = QPushButton("－")
+    zoom_out_btn.setFixedSize(26, 26)
+    zoom_out_btn.setObjectName("btn_outline")
+
+    zoom_lbl = QLabel("100%")
+    zoom_lbl.setFixedWidth(42)
+    zoom_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    zoom_lbl.setStyleSheet("font-size: 11px; color: #555;")
+
+    zoom_in_btn = QPushButton("＋")
+    zoom_in_btn.setFixedSize(26, 26)
+    zoom_in_btn.setObjectName("btn_outline")
+
     save_btn = QPushButton("Save plot…")
     save_btn.setObjectName("btn_outline")
-    save_btn.setFixedHeight(28)
+    save_btn.setFixedHeight(26)
 
     ctrl.addWidget(hint_lbl)
     ctrl.addStretch()
+    ctrl.addWidget(zoom_out_btn)
+    ctrl.addWidget(zoom_lbl)
+    ctrl.addWidget(zoom_in_btn)
+    ctrl.addSpacing(10)
     ctrl.addWidget(save_btn)
 
     vbox.addLayout(ctrl)
-    vbox.addWidget(pg_widget, 1)
 
+    # ── Scroll area ───────────────────────────────────────────────
+    scroll = _ZoomScrollArea(pg_widget, base_height=base_height)
+    vbox.addWidget(scroll, 1)
+
+    # Wire zoom buttons; update label on every zoom change
+    def _apply(z: float) -> None:
+        scroll._apply_zoom(z)
+        zoom_lbl.setText(f"{int(round(scroll.zoom_level() * 100))}%")
+
+    zoom_in_btn.clicked.connect(lambda: _apply(scroll.zoom_level() * 1.3))
+    zoom_out_btn.clicked.connect(lambda: _apply(scroll.zoom_level() / 1.3))
+
+    # Patch _ZoomScrollArea to also update the label on Ctrl+scroll
+    _orig_apply = scroll._apply_zoom
+
+    def _patched_apply(z: float) -> None:
+        _orig_apply(z)
+        zoom_lbl.setText(f"{int(round(scroll.zoom_level() * 100))}%")
+
+    scroll._apply_zoom = _patched_apply
+
+    # ── Save ──────────────────────────────────────────────────────
     def _save():
         default = Path.home() / f"{save_stem}.png"
         dest, _ = QFileDialog.getSaveFileName(
@@ -886,11 +1004,13 @@ class PlotViewer(QWidget):
             )
             return
 
-        frame_order, frame_colors = _frame_order_and_colors(obs_rows)
+        frame_order, frame_colors, mutation_colors = \
+            _frame_order_and_colors(obs_rows)
 
         # ── Tab 1 — Escape Scores ─────────────────────────────────────────
         try:
-            glw = _build_escape_scores(obs_rows, frame_order, frame_colors)
+            glw = _build_escape_scores(
+                obs_rows, frame_order, frame_colors, mutation_colors)
             tab = _make_panel(glw, stem("escape_scores"))
         except Exception as exc:
             tab = _make_error_panel(str(exc))
@@ -902,8 +1022,10 @@ class PlotViewer(QWidget):
             if sim_path and sim_path.exists():
                 try:
                     sim_rows = _load_csv(sim_path)
-                    glw = _build_percentile_scores(obs_rows, sim_rows, frame_colors)
-                    tab = _make_panel(glw, stem("percentile_scores", sim_part))
+                    glw = _build_percentile_scores(
+                        obs_rows, sim_rows, frame_colors, mutation_colors)
+                    tab = _make_panel(glw, stem("percentile_scores", sim_part),
+                                      base_height=500)
                 except Exception as exc:
                     tab = _make_error_panel(str(exc))
             else:
@@ -926,7 +1048,7 @@ class PlotViewer(QWidget):
                     # Per-mutation scatter
                     try:
                         glw_scat = _build_per_allele_scatter(
-                            pa_rows, frame_order, frame_colors
+                            pa_rows, frame_order, frame_colors, mutation_colors
                         )
                         pa_tabs.addTab(
                             _make_panel(glw_scat,
