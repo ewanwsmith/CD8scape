@@ -1,52 +1,108 @@
 """
-plots_widget.py — Embedded Matplotlib plot viewer for CD8scape outputs.
+plots_widget.py — Interactive plot viewer for CD8scape outputs.
 
-Provides PlotViewer, a QWidget with sub-tabs that render the same family
-of diagnostic plots as the reference notebook (plot_output.ipynb):
+Uses pyqtgraph (a PyQt-native library) for all rendering — trackpad scroll,
+pinch-to-zoom, and drag-to-pan all work without any custom event handling.
 
-  • HMBR        — ancestral vs derived harmonic-mean best rank (Plot A)
-  • log₂ FC     — log₂ fold-change in HMBR per mutation (Plot B)
-  • Simulated   — per-mutation density of null distribution with observed mark
-  • Per-Allele  — per-allele log₂ fold-change scatter (requires --per-allele)
-  • Allele Box  — per-allele distribution boxplot (requires --per-allele)
+Three conditional plot tabs, mirroring the reference notebook (plot_output.ipynb):
 
-All plots are faceted by protein / reading-frame and sorted by genomic locus.
+  • Escape Scores         — log₂ fold-change in HMBR per mutation, faceted by
+                            reading frame.  Always shown after a run.
 
-Requires matplotlib (>=3.7).  If matplotlib is absent the widget degrades
-gracefully to a plain "install matplotlib" notice.
+  • Percentile Scores     — per-mutation density of the simulated null
+                            distribution with the observed value marked.
+                            Shown only when percentile analysis was run.
+
+  • Per-Allele Escape     — per-allele log₂ fold-change scatter (Per Mutation
+    Scores                  sub-tab) and boxplot by allele (By Allele sub-tab).
+                            Shown only when --per-allele was requested.
+
+Saving: each plot panel has a "Save…" button that writes a PNG or SVG with a
+standardised filename:
+    CD8scape_escape_scores_{folder}_{suffix}.png
+    CD8scape_percentile_scores_{folder}_{suffix}.png
+    CD8scape_per_allele_escape_scores_{folder}_{suffix}.png
+
+COLUMN_TOOLTIPS is imported by app_qt.py to add hover-over explanations to
+the file-preview table in the Files tab.
+
+Requires: pyqtgraph>=0.13, numpy>=1.24
 """
 from __future__ import annotations
 
 import csv
 import math
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QFrame,
+    QHBoxLayout,
     QLabel,
-    QScrollArea,
-    QSizePolicy,
+    QMessageBox,
+    QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-# ── Optional matplotlib import ────────────────────────────────────────────────
-_MPL_OK = False
+# ── pyqtgraph ─────────────────────────────────────────────────────────────────
+_PG_OK = False
 try:
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-    from matplotlib.gridspec import GridSpec
-    from matplotlib.patches import Patch
-    import matplotlib.ticker as mticker
-    import numpy as np
-    _MPL_OK = True
+    import pyqtgraph as pg
+    import pyqtgraph.exporters  # ensure exporters are registered
+
+    pg.setConfigOptions(antialias=True, background="#ffffff")
+    _PG_OK = True
 except ImportError:
     pass
 
-# ── Protein-name → short label (matching plot_a.R / plot_sim.R) ──────────────
+# ── Column tooltips exported to app_qt.py ─────────────────────────────────────
+COLUMN_TOOLTIPS: Dict[str, str] = {
+    "Frame":
+        "Reading frame / protein the variant falls in.",
+    "Locus":
+        "Genomic position of the variant (nucleotide index).",
+    "Mutation":
+        "Amino-acid change or indel description.",
+    "HMBR_A":
+        "Harmonic Mean Best Rank — ancestral allele.\n"
+        "Lower values mean a peptide is predicted to bind better.",
+    "HMBR_D":
+        "Harmonic Mean Best Rank — derived (mutant) allele.\n"
+        "Lower values mean a peptide is predicted to bind better.",
+    "foldchange_HMBR":
+        "Derived HMBR ÷ ancestral HMBR.\n"
+        ">1 → escape (derived binds worse); <1 → gained binding.",
+    "log2_foldchange_HMBR":
+        "log₂(derived HMBR / ancestral HMBR).\n"
+        "Positive → immune escape (derived binds worse).\n"
+        "Negative → increased predicted binding after mutation.",
+    "MHC":
+        "HLA allele used for this binding prediction.",
+    "ELBR_A":
+        "Expected Log Best Rank — ancestral allele (per-allele metric).",
+    "ELBR_D":
+        "Expected Log Best Rank — derived allele (per-allele metric).",
+    "foldchange_BR":
+        "Derived best rank ÷ ancestral best rank for this allele.\n"
+        ">1 → escape; <1 → gained binding.",
+    "log2_foldchange_BR":
+        "log₂(derived / ancestral) best rank for this allele.\n"
+        "Positive → escape; Negative → increased binding.",
+    "Percentile":
+        "Enrichment percentile relative to the simulated background.\n"
+        "Higher → more significant predicted immune escape.",
+    "max_escape_allele":
+        "The HLA allele showing the largest predicted escape for this mutation.",
+    "max_escape_log2_fc":
+        "log₂ fold change for the max-escape allele.",
+}
+
+# ── Protein-name abbreviations ────────────────────────────────────────────────
 FRAME_ABBREVS: Dict[str, str] = {
     "RNA-dependent RNA polymerase": "RdRp",
     "surface glycoprotein":         "S",
@@ -62,18 +118,26 @@ FRAME_ABBREVS: Dict[str, str] = {
     "endoRNAse":                    "endoRNAse",
 }
 
-# HLA-locus colour palette (approximates R viridis mako begin=0.2, end=0.8)
+# Viridis-sampled palette (covers up to 20 reading frames)
+_VIRIDIS_HEX = [
+    "#440154", "#46085c", "#470d60", "#481769", "#482273",
+    "#472d7b", "#453882", "#414287", "#3d4d8a", "#38578c",
+    "#33618d", "#2e6b8e", "#29758e", "#257f8e", "#218a8d",
+    "#1d948a", "#1a9e86", "#1fa87f", "#2db27d", "#41bc77",
+]
+
+# HLA-locus palette (approximates viridis mako)
 LOCUS_COLORS: Dict[str, str] = {
     "A": "#2d1160",
     "B": "#2272b5",
     "C": "#6ecdc8",
 }
-LOCUS_FALLBACK = "#888888"
+_LOCUS_FALLBACK = "#888888"
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Data helpers ──────────────────────────────────────────────────────────────
 
-def _safe_float(val: str) -> Optional[float]:
+def _safe_float(val: Any) -> Optional[float]:
     try:
         f = float(val)
         return None if (math.isnan(f) or math.isinf(f)) else f
@@ -87,7 +151,6 @@ def _load_csv(path: Path) -> List[Dict[str, str]]:
 
 
 def _find_file(folder: Path, stem: str, suffix: str) -> Optional[Path]:
-    """Locate <stem>_<suffix>.csv or <stem>.csv inside folder."""
     if suffix:
         p = folder / f"{stem}_{suffix}.csv"
         if p.exists():
@@ -96,33 +159,23 @@ def _find_file(folder: Path, stem: str, suffix: str) -> Optional[Path]:
     return p if p.exists() else None
 
 
-def _viridis(n: int) -> List[tuple]:
-    """Return n evenly-spaced colours from the viridis colormap."""
-    if not _MPL_OK or n == 0:
-        return []
-    import matplotlib.cm as cm
-    cmap = cm.get_cmap("viridis")
-    return [cmap(i / max(n - 1, 1)) for i in range(n)]
-
-
 def _frame_order_and_colors(
     rows: List[Dict],
-) -> Tuple[List[str], Dict[str, tuple]]:
-    """
-    Return (frame_order, frame_colors) where frame_order is sorted by the
-    minimum genomic locus appearing in each frame (matching the notebook).
-    """
+) -> Tuple[List[str], Dict[str, str]]:
+    """Return (frame_order, {frame: hex_color}), ordered by minimum locus."""
     min_locus: Dict[str, float] = {}
     for r in rows:
-        frame = r.get("Frame", "")
+        f = r.get("Frame", "")
         locus = _safe_float(r.get("Locus", ""))
-        if frame and locus is not None:
-            if frame not in min_locus or locus < min_locus[frame]:
-                min_locus[frame] = locus
-    frame_order = sorted(min_locus, key=lambda f: min_locus[f])
-    colors = _viridis(len(frame_order))
-    frame_colors = dict(zip(frame_order, colors))
-    return frame_order, frame_colors
+        if f and locus is not None:
+            if f not in min_locus or locus < min_locus[f]:
+                min_locus[f] = locus
+    order = sorted(min_locus, key=lambda f: min_locus[f])
+    n = len(order)
+    palette = _VIRIDIS_HEX[:n] if n <= len(_VIRIDIS_HEX) else (
+        _VIRIDIS_HEX * (n // len(_VIRIDIS_HEX) + 1)
+    )[:n]
+    return order, dict(zip(order, palette))
 
 
 def _mutations_by_frame(
@@ -130,305 +183,247 @@ def _mutations_by_frame(
     frame_order: List[str],
     value_cols: List[str],
 ) -> Dict[str, List[Dict]]:
-    """Group and sort rows by frame / locus, keeping only rows with ≥1 valid value."""
     grouped: Dict[str, List[Dict]] = {f: [] for f in frame_order}
     for r in rows:
-        frame = r.get("Frame", "")
-        if frame not in grouped:
+        f = r.get("Frame", "")
+        if f not in grouped:
             continue
         locus = _safe_float(r.get("Locus", ""))
         if locus is None:
             continue
         if not any(_safe_float(r.get(c, "")) is not None for c in value_cols):
             continue
-        grouped[frame].append(r)
-    for frame in grouped:
-        grouped[frame].sort(key=lambda r: _safe_float(r.get("Locus", "")) or 0)
+        grouped[f].append(r)
+    for f in grouped:
+        grouped[f].sort(key=lambda r: _safe_float(r.get("Locus", "")) or 0)
     return grouped
 
 
-def _apply_facet_style(ax, col_idx: int, frame: str, y_label: str) -> None:
-    """Apply shared facet aesthetics to a subplot axis."""
-    abbrev = FRAME_ABBREVS.get(frame, frame)
-    ax.set_title(abbrev, fontsize=9, fontweight="bold", pad=3,
-                 bbox=dict(facecolor="#f2f2f7", edgecolor="none", pad=2))
-    ax.set_facecolor("white")
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.5)
-        spine.set_color("#aaaaaa")
-    ax.tick_params(axis="both", labelsize=8, length=3)
-    ax.grid(axis="y", linewidth=0.3, color="#eeeeee", zorder=0)
-    if col_idx == 0:
-        ax.set_ylabel(y_label, fontsize=9)
-    else:
-        ax.set_ylabel("")
-        ax.tick_params(axis="y", labelleft=False)
+def _gaussian_kde(data: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Silverman-bandwidth Gaussian KDE."""
+    bw = 1.06 * float(np.std(data)) * len(data) ** (-0.2)
+    diff = x[:, None] - data[None, :]
+    kernel = np.exp(-0.5 * (diff / bw) ** 2)
+    return kernel.mean(axis=1) / (bw * math.sqrt(2 * math.pi))
 
 
-def _make_faceted_figure(
+# ── pyqtgraph styling helpers ─────────────────────────────────────────────────
+
+def _hex_to_rgba(h: str, alpha: int = 200) -> Tuple[int, int, int, int]:
+    h = h.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return (r, g, b, alpha)
+
+
+def _style_plot(p: "pg.PlotItem", title: str = "") -> None:
+    """Apply shared visual style to a pyqtgraph PlotItem."""
+    if title:
+        p.setTitle(title, color="#1d1d1f", size="9pt")
+    p.getAxis("bottom").setPen(pg.mkPen("#aaaaaa", width=0.5))
+    p.getAxis("left").setPen(pg.mkPen("#aaaaaa", width=0.5))
+    p.getAxis("bottom").setTextPen(pg.mkPen("#333333"))
+    p.getAxis("left").setTextPen(pg.mkPen("#333333"))
+    p.showGrid(x=False, y=True, alpha=0.12)
+    # Enable ViewBox pan/zoom (left-drag = pan, scroll = zoom)
+    vb = p.getViewBox()
+    vb.setMouseMode(pg.ViewBox.PanMode)
+
+
+# ── Plot builders ─────────────────────────────────────────────────────────────
+
+def _build_escape_scores(
+    rows: List[Dict],
     frame_order: List[str],
-    grouped: Dict[str, List[Dict]],
-    fig_height: float = 5.0,
-    mutation_width: float = 0.55,
-    min_fig_width: float = 10.0,
-) -> Tuple["Figure", List, List[str]]:
+    frame_colors: Dict[str, str],
+) -> "pg.GraphicsLayoutWidget":
     """
-    Build a Figure with one subplot per frame.
-    Returns (fig, axes_list, active_frames).
+    Bar chart: log₂ fold-change in HMBR per mutation, faceted by frame.
+    All mutations shown; dashed line at 0.
     """
+    grouped = _mutations_by_frame(rows, frame_order, ["log2_foldchange_HMBR"])
     active = [f for f in frame_order if grouped.get(f)]
     if not active:
-        raise ValueError("No data to plot.")
-    counts = [len(grouped[f]) for f in active]
-    total = sum(counts)
-    fig_width = max(min_fig_width, total * mutation_width + len(active) * 0.8 + 1.5)
-
-    fig = Figure(figsize=(fig_width, fig_height), dpi=100)
-    fig.patch.set_facecolor("#f5f5f7")
-    gs = GridSpec(
-        1, len(active),
-        figure=fig,
-        width_ratios=counts,
-        wspace=0.05,
-        left=0.06, right=0.99,
-        bottom=0.30, top=0.88,
-    )
-    axes = [fig.add_subplot(gs[0, i]) for i in range(len(active))]
-    return fig, axes, active
-
-
-# ── Individual plot renderers ─────────────────────────────────────────────────
-
-def _render_hmbr(rows: List[Dict]) -> "Figure":
-    """
-    Plot A: dodged bar chart of HMBR_A (ancestral) vs HMBR_D (derived),
-    faceted by Frame, sorted by Locus.  Y-axis is sqrt-scaled.
-    """
-    frame_order, frame_colors = _frame_order_and_colors(rows)
-    grouped = _mutations_by_frame(rows, frame_order, ["HMBR_A", "HMBR_D"])
-
-    fig, axes, active = _make_faceted_figure(frame_order, grouped, fig_height=5.2)
-
-    # Collect all finite HMBR values for global y-range
-    all_vals = []
-    for r in rows:
-        for col in ("HMBR_A", "HMBR_D"):
-            v = _safe_float(r.get(col, ""))
-            if v is not None:
-                all_vals.append(v)
-    y_max_lin = max(all_vals) * 1.08 if all_vals else 10.0
-    sqrt_max = math.sqrt(y_max_lin)
-
-    bar_w = 0.38
-    threshold_sqrt = math.sqrt(2.0)
-
-    for col_idx, (ax, frame) in enumerate(zip(axes, active)):
-        mutations = grouped[frame]
-        color = frame_colors.get(frame, (0.5, 0.5, 0.5, 1.0))
-        n = len(mutations)
-
-        for i, r in enumerate(mutations):
-            ha = _safe_float(r.get("HMBR_A", "")) or 0.0
-            hd = _safe_float(r.get("HMBR_D", "")) or 0.0
-            ax.bar(i - bar_w / 2, math.sqrt(ha), width=bar_w,
-                   color=color, alpha=0.9, zorder=2, linewidth=0)
-            ax.bar(i + bar_w / 2, math.sqrt(hd), width=bar_w,
-                   color=color, alpha=0.45, zorder=2, linewidth=0)
-
-        ax.axhline(threshold_sqrt, linestyle="--", linewidth=0.6,
-                   color="#555555", zorder=3)
-        ax.set_xlim(-0.65, n - 0.35)
-        ax.set_ylim(0, sqrt_max * 1.08)
-
-        ax.set_xticks(range(n))
-        ax.set_xticklabels(
-            [r.get("Mutation", "") for r in mutations],
-            rotation=90, ha="right", va="top", fontsize=7,
-        )
-
-        # Custom sqrt-scale y-ticks: show nice linear values
-        nice_lin = [v for v in (0, 1, 2, 5, 10, 20, 50, 100, 200)
-                    if math.sqrt(v) <= sqrt_max * 1.08]
-        ax.set_yticks([math.sqrt(v) for v in nice_lin])
-        if col_idx == 0:
-            ax.set_yticklabels([str(v) for v in nice_lin], fontsize=8)
-        else:
-            ax.set_yticklabels([])
-
-        _apply_facet_style(ax, col_idx, frame, "HMBR  (√ scale)")
-
-    # Legend: Ancestral / Derived
-    legend_handles = [
-        Patch(facecolor="grey", alpha=0.9, label="Ancestral"),
-        Patch(facecolor="grey", alpha=0.45, label="Derived"),
-    ]
-    axes[-1].legend(handles=legend_handles, fontsize=8, loc="upper right",
-                    frameon=True, framealpha=0.9, edgecolor="#cccccc")
-
-    fig.suptitle("Harmonic Mean Best Rank — Ancestral vs Derived",
-                 fontsize=10, y=0.97)
-    return fig
-
-
-def _render_log2fc(rows: List[Dict]) -> "Figure":
-    """
-    Plot B: bar chart of log₂ fold-change in HMBR per mutation,
-    faceted by Frame.
-    """
-    frame_order, frame_colors = _frame_order_and_colors(rows)
-    grouped = _mutations_by_frame(rows, frame_order, ["log2_foldchange_HMBR"])
-
-    fig, axes, active = _make_faceted_figure(frame_order, grouped, fig_height=5.0)
+        raise ValueError("No log₂ fold-change data found.")
 
     all_fc = [_safe_float(r.get("log2_foldchange_HMBR", ""))
               for r in rows if _safe_float(r.get("log2_foldchange_HMBR", "")) is not None]
-    y_lim = max(abs(v) for v in all_fc) * 1.1 if all_fc else 3.0
+    y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
 
-    bar_w = 0.65
+    glw = pg.GraphicsLayoutWidget()
+    glw.setBackground("#f5f5f7")
 
-    for col_idx, (ax, frame) in enumerate(zip(axes, active)):
+    first_plot = None
+    for col_i, frame in enumerate(active):
         mutations = grouped[frame]
-        color = frame_colors.get(frame, (0.5, 0.5, 0.5, 1.0))
         n = len(mutations)
+        abbrev = FRAME_ABBREVS.get(frame, frame)
 
-        for i, r in enumerate(mutations):
-            fc = _safe_float(r.get("log2_foldchange_HMBR", ""))
-            if fc is not None:
-                ax.bar(i, fc, width=bar_w, color=color, alpha=0.88,
-                       zorder=2, linewidth=0)
+        p = glw.addPlot(row=0, col=col_i, title=abbrev)
+        _style_plot(p)
+        p.setTitle(abbrev, color="#1d1d1f", size="9pt",
+                   bold=True, italic=False)
 
-        ax.axhline(0, linestyle="--", linewidth=0.6, color="#555555", zorder=3)
-        ax.set_xlim(-0.65, n - 0.35)
-        ax.set_ylim(-y_lim, y_lim)
+        # Proportional column widths
+        glw.ci.layout.setColumnStretchFactor(col_i, max(1, n))
 
-        ax.set_xticks(range(n))
-        ax.set_xticklabels(
-            [r.get("Mutation", "") for r in mutations],
-            rotation=90, ha="right", va="top", fontsize=7,
+        color_hex = frame_colors.get(frame, "#440154")
+        rgba = _hex_to_rgba(color_hex, 210)
+
+        heights = np.array([
+            _safe_float(r.get("log2_foldchange_HMBR", "")) or 0.0
+            for r in mutations
+        ])
+        x = np.arange(n, dtype=float)
+
+        bars = pg.BarGraphItem(
+            x=x, height=heights, width=0.65,
+            brush=pg.mkBrush(*rgba),
+            pen=pg.mkPen(None),
         )
-        _apply_facet_style(ax, col_idx, frame,
-                           "log₂ Fold Change HMBR")
+        p.addItem(bars)
 
-    fig.suptitle("log₂ Fold Change in Harmonic Mean Best Rank",
-                 fontsize=10, y=0.97)
-    return fig
-
-
-def _render_simulated(obs_rows: List[Dict], sim_rows: List[Dict]) -> "Figure":
-    """
-    Plot sim: for each enriched observed mutation, plot a kernel-density
-    estimate of the simulated null distribution and mark the observed value
-    with its percentile.  Arranged in a 3-row grid (matching notebook).
-    """
-    # Filter observed to enriched mutations only
-    enriched = []
-    for r in obs_rows:
-        fc = _safe_float(r.get("log2_foldchange_HMBR", ""))
-        ha = _safe_float(r.get("HMBR_A", ""))
-        hd = _safe_float(r.get("HMBR_D", ""))
-        # Only show enriched (FC > 0) and not trivially high-rank variants
-        if fc is not None and fc > 0:
-            if not (ha is not None and hd is not None and ha > 2 and hd > 2):
-                enriched.append(r)
-
-    if not enriched:
-        raise ValueError(
-            "No enriched mutations found (log₂FC > 0).\n"
-            "Run with percentile analysis enabled to see the simulated background."
+        # y = 0 dashed line
+        zero = pg.InfiniteLine(
+            pos=0, angle=0,
+            pen=pg.mkPen("#555555", width=1,
+                         style=Qt.PenStyle.DashLine),
         )
+        p.addItem(zero)
 
-    # Simulated log2FC values
-    sim_vals = [_safe_float(r.get("log2_foldchange_HMBR", ""))
-                for r in sim_rows]
-    sim_vals = np.array([v for v in sim_vals if v is not None], dtype=float)
+        # x-axis: mutation names, rotated
+        ticks = [[(i, mutations[i].get("Mutation", "")) for i in range(n)]]
+        ax_bot = p.getAxis("bottom")
+        ax_bot.setTicks(ticks)
+        ax_bot.setStyle(tickTextAngle=-90, tickTextOffset=2,
+                        tickFont=_small_font())
+
+        p.setXRange(-0.6, n - 0.4, padding=0)
+        p.setYRange(-y_lim, y_lim, padding=0)
+
+        if col_i == 0:
+            p.setLabel("left", "log₂ FC HMBR", color="#333333", size="8pt")
+            first_plot = p
+        else:
+            p.hideAxis("left")
+            if first_plot:
+                p.setYLink(first_plot)
+
+    return glw
+
+
+def _build_percentile_scores(
+    obs_rows: List[Dict],
+    sim_rows: List[Dict],
+    frame_colors: Dict[str, str],
+) -> "pg.GraphicsLayoutWidget":
+    """
+    One density panel per mutation (all mutations with valid data),
+    showing the simulated null KDE with the observed log₂FC marked.
+    """
+    sim_vals = np.array(
+        [v for r in sim_rows
+         if (v := _safe_float(r.get("log2_foldchange_HMBR", ""))) is not None],
+        dtype=float,
+    )
     if len(sim_vals) < 10:
         raise ValueError("Insufficient simulated data for density estimate.")
 
-    # Sort enriched by Locus
-    enriched.sort(key=lambda r: _safe_float(r.get("Locus", "")) or 0)
-
-    # Frame → color
-    frame_order, frame_colors = _frame_order_and_colors(obs_rows)
-
-    # KDE using Silverman's rule
-    bw = 1.06 * float(np.std(sim_vals)) * len(sim_vals) ** (-0.2)
-    n_kde = 512
-    x_full = np.linspace(sim_vals.min() - 3 * bw, sim_vals.max() + 3 * bw, n_kde)
-
-    def _kde_at(x_pts: np.ndarray) -> np.ndarray:
-        diff = x_pts[:, None] - sim_vals[None, :]          # (n_x, n_sim)
-        kernel = np.exp(-0.5 * (diff / bw) ** 2)
-        return kernel.mean(axis=1) / (bw * math.sqrt(2 * math.pi))
-
-    y_full = _kde_at(x_full)
-    global_y_max = float(y_full.max())
-
-    # ECDF for percentile annotation
     sorted_sim = np.sort(sim_vals)
 
-    def _percentile(v: float) -> float:
+    def _pctile(v: float) -> float:
         return float(np.searchsorted(sorted_sim, v, side="right")) / len(sorted_sim) * 100
 
-    # Layout: up to 3 rows, columns fill as needed
-    n_mut = len(enriched)
+    # All mutations with valid log2FC (no positivity filter)
+    candidates = []
+    for r in obs_rows:
+        fc = _safe_float(r.get("log2_foldchange_HMBR", ""))
+        locus = _safe_float(r.get("Locus", ""))
+        if fc is not None and locus is not None:
+            candidates.append(r)
+    candidates.sort(key=lambda r: _safe_float(r.get("Locus", "")) or 0)
+
+    if not candidates:
+        raise ValueError("No mutations with valid fold-change data found.")
+
+    n_mut = len(candidates)
+    n_cols = max(1, math.ceil(n_mut / 3))
     n_rows = min(3, n_mut)
-    n_cols = math.ceil(n_mut / n_rows)
-    fig_width = max(10, n_cols * 3.5)
-    fig_height = n_rows * 3.0 + 0.8
 
-    fig = Figure(figsize=(fig_width, fig_height), dpi=100)
-    fig.patch.set_facecolor("#f5f5f7")
+    # KDE grid on the full sim distribution
+    x_full = np.linspace(sim_vals.min() - 1.5, sim_vals.max() + 1.5, 512)
+    y_full = _gaussian_kde(sim_vals, x_full)
+    y_max = float(y_full.max())
 
-    for idx, r in enumerate(enriched):
-        row_i = idx % n_rows
+    glw = pg.GraphicsLayoutWidget()
+    glw.setBackground("#f5f5f7")
+
+    for idx, r in enumerate(candidates):
         col_i = idx // n_rows
-        ax = fig.add_subplot(n_rows, n_cols, row_i * n_cols + col_i + 1)
+        row_i = idx % n_rows
 
         frame = r.get("Frame", "")
         obs_fc = _safe_float(r.get("log2_foldchange_HMBR", "")) or 0.0
         mutation = r.get("Mutation", "")
-        color = frame_colors.get(frame, (0.5, 0.5, 0.5, 1.0))
-
-        # Window the density around the observed value
-        left_margin, right_margin = 2.5, 3.5
-        x_window = x_full[(x_full >= obs_fc - left_margin) &
-                           (x_full <= obs_fc + right_margin)]
-        y_window = _kde_at(x_window)
-
-        ax.fill_between(x_window, y_window, alpha=0.75, color=color, linewidth=0)
-        ax.axvline(obs_fc, linestyle="--", linewidth=1.0, color="#333333", zorder=3)
-
-        pct = _percentile(obs_fc)
         abbrev = FRAME_ABBREVS.get(frame, frame)
-        label = f"{mutation} ({abbrev})\n{obs_fc:.3g}  ({pct:.3g}th pctile)"
-        ax.text(obs_fc + 0.12, global_y_max * 0.82, label,
-                fontsize=7, ha="left", va="top", color="#222222",
-                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1))
+        pct = _pctile(obs_fc)
 
-        ax.set_xlabel("log₂FC HMBR", fontsize=7)
-        ax.set_ylabel("Density", fontsize=7) if col_i == 0 else None
-        ax.set_facecolor("white")
-        ax.tick_params(labelsize=7)
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.4)
-            spine.set_color("#aaaaaa")
+        title = f"{mutation}  ({abbrev})"
+        p = glw.addPlot(row=row_i, col=col_i, title=title)
+        _style_plot(p)
+        p.setTitle(title, color="#1d1d1f", size="8pt")
 
-    fig.suptitle("Simulated Null Distribution — Observed Values Marked",
-                 fontsize=10, y=0.99)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
-    return fig
+        color_hex = frame_colors.get(frame, "#440154")
+        rgba = _hex_to_rgba(color_hex, 180)
+
+        # Window the density near the observed value
+        left_m, right_m = 2.5, 3.5
+        mask = (x_full >= obs_fc - left_m) & (x_full <= obs_fc + right_m)
+        x_win = x_full[mask]
+        y_win = y_full[mask]
+
+        # Filled density curve
+        curve = p.plot(
+            x_win, y_win,
+            fillLevel=0,
+            brush=pg.mkBrush(*rgba),
+            pen=pg.mkPen(color_hex, width=1),
+        )
+
+        # Observed value vertical line
+        obs_line = pg.InfiniteLine(
+            pos=obs_fc, angle=90,
+            pen=pg.mkPen("#333333", width=1.5,
+                         style=Qt.PenStyle.DashLine),
+            label=f"{obs_fc:.2g}\n({pct:.1f}th %ile)",
+            labelOpts=dict(
+                position=0.80,
+                color="#1d1d1f",
+                movable=False,
+                fill=pg.mkBrush(255, 255, 255, 180),
+            ),
+        )
+        p.addItem(obs_line)
+
+        p.setLabel("bottom", "log₂ FC HMBR", color="#555555", size="7pt")
+        if col_i == 0:
+            p.setLabel("left", "Density", color="#555555", size="7pt")
+        else:
+            p.hideAxis("left")
+
+    return glw
 
 
-def _render_per_allele_scatter(
+def _build_per_allele_scatter(
     pa_rows: List[Dict],
     frame_order: List[str],
-) -> "Figure":
+    frame_colors: Dict[str, str],
+) -> "pg.GraphicsLayoutWidget":
     """
-    Per-allele log₂ fold-change scatter, faceted by Frame.
-    Each point is one (mutation, allele) pair, coloured by HLA locus.
+    Scatter: per-allele log₂ fold-change per mutation, faceted by frame,
+    coloured by HLA locus (A / B / C).
     """
-    # Enrich rows with derived fields
-    enriched: List[Dict] = []
+    # Enrich rows
+    enriched = []
     for r in pa_rows:
         fc = _safe_float(r.get("log2_foldchange_BR", ""))
         locus = _safe_float(r.get("Locus", ""))
@@ -436,228 +431,290 @@ def _render_per_allele_scatter(
         if fc is None or locus is None:
             continue
         allele_short = mhc.replace("HLA-", "").replace("HLA*", "")
-        hla_locus = ""
-        for ch in mhc:
-            if ch in ("A", "B", "C"):
-                hla_locus = ch
-                break
+        hla_locus = next((c for c in mhc if c in ("A", "B", "C")), "")
         enriched.append({**r, "log2_foldchange_BR": fc, "Locus": locus,
                          "allele_short": allele_short, "HLA_locus": hla_locus})
 
     if not enriched:
         raise ValueError("No valid per-allele data found.")
 
-    grouped = _mutations_by_frame(
-        enriched, frame_order, ["log2_foldchange_BR"]
-    )
+    grouped = _mutations_by_frame(enriched, frame_order, ["log2_foldchange_BR"])
+    active = [f for f in frame_order if grouped.get(f)]
+    if not active:
+        raise ValueError("No per-allele data found for any frame.")
 
-    fig, axes, active = _make_faceted_figure(
-        frame_order, grouped, fig_height=5.0, mutation_width=0.60
-    )
-
-    all_fc = [r["log2_foldchange_BR"] for r in enriched
-              if isinstance(r["log2_foldchange_BR"], float)]
-    y_lim = max(abs(v) for v in all_fc) * 1.1 if all_fc else 3.0
+    all_fc = [r["log2_foldchange_BR"] for r in enriched]
+    y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
 
     rng = np.random.default_rng(42)
 
-    for col_idx, (ax, frame) in enumerate(zip(axes, active)):
-        mutations = grouped[frame]
-        # Group points per mutation position
-        mut_positions: Dict[str, int] = {}
-        mut_list = []
-        for r in mutations:
-            mut = r.get("Mutation", "")
-            if mut not in mut_positions:
-                mut_positions[mut] = len(mut_list)
-                mut_list.append(mut)
+    glw = pg.GraphicsLayoutWidget()
+    glw.setBackground("#f5f5f7")
 
-        for r in mutations:
-            mut = r.get("Mutation", "")
+    first_plot = None
+    for col_i, frame in enumerate(active):
+        mutations_data = grouped[frame]
+        abbrev = FRAME_ABBREVS.get(frame, frame)
+
+        p = glw.addPlot(row=0, col=col_i)
+        _style_plot(p, title=abbrev)
+
+        n_muts = len({r.get("Mutation", "") for r in mutations_data})
+        glw.ci.layout.setColumnStretchFactor(col_i, max(1, n_muts))
+
+        # Group by mutation position
+        mut_order: List[str] = []
+        mut_positions: Dict[str, int] = {}
+        for r in mutations_data:
+            m = r.get("Mutation", "")
+            if m not in mut_positions:
+                mut_positions[m] = len(mut_order)
+                mut_order.append(m)
+
+        # Scatter points
+        xs, ys, brushes = [], [], []
+        for r in mutations_data:
+            m = r.get("Mutation", "")
             fc = r["log2_foldchange_BR"]
             hla_locus = r["HLA_locus"]
-            x = mut_positions[mut] + rng.uniform(-0.15, 0.15)
-            color = LOCUS_COLORS.get(hla_locus, LOCUS_FALLBACK)
-            ax.scatter(x, fc, s=28, color=color, alpha=0.85, zorder=2,
-                       linewidths=0)
+            x_pos = mut_positions[m] + float(rng.uniform(-0.15, 0.15))
+            color = LOCUS_COLORS.get(hla_locus, _LOCUS_FALLBACK)
+            xs.append(x_pos)
+            ys.append(fc)
+            brushes.append(pg.mkBrush(*_hex_to_rgba(color, 200)))
 
-        ax.axhline(0, linestyle="--", linewidth=0.6, color="#555555", zorder=3)
-        n = len(mut_list)
-        ax.set_xlim(-0.65, n - 0.35)
-        ax.set_ylim(-y_lim, y_lim)
-        ax.set_xticks(range(n))
-        ax.set_xticklabels(mut_list, rotation=90, ha="right", va="top", fontsize=7)
-        _apply_facet_style(ax, col_idx, frame, "log₂FC Best Rank (per allele)")
+        scatter = pg.ScatterPlotItem(
+            x=np.array(xs), y=np.array(ys),
+            size=7, pen=pg.mkPen(None), brush=brushes,
+        )
+        p.addItem(scatter)
 
-    # HLA-locus legend
-    handles = [Patch(facecolor=LOCUS_COLORS.get(l, LOCUS_FALLBACK), label=l)
-               for l in ("A", "B", "C")]
-    axes[-1].legend(handles=handles, title="HLA locus", fontsize=8,
-                    title_fontsize=8, loc="upper right",
-                    frameon=True, framealpha=0.9, edgecolor="#cccccc")
+        # y = 0 line
+        p.addItem(pg.InfiniteLine(
+            pos=0, angle=0,
+            pen=pg.mkPen("#555555", width=1, style=Qt.PenStyle.DashLine),
+        ))
 
-    fig.suptitle("Per-Allele log₂ Fold Change in Best Rank",
-                 fontsize=10, y=0.97)
-    return fig
+        ticks = [[(i, mut_order[i]) for i in range(len(mut_order))]]
+        ax = p.getAxis("bottom")
+        ax.setTicks(ticks)
+        ax.setStyle(tickTextAngle=-90, tickTextOffset=2, tickFont=_small_font())
+
+        p.setXRange(-0.65, len(mut_order) - 0.35, padding=0)
+        p.setYRange(-y_lim, y_lim, padding=0)
+
+        if col_i == 0:
+            p.setLabel("left", "log₂ FC Best Rank", color="#333333", size="8pt")
+            first_plot = p
+        else:
+            p.hideAxis("left")
+            if first_plot:
+                p.setYLink(first_plot)
+
+    return glw
 
 
-def _render_per_allele_box(pa_rows: List[Dict]) -> "Figure":
+def _build_per_allele_box(pa_rows: List[Dict]) -> "pg.GraphicsLayoutWidget":
     """
-    Boxplot of per-allele log₂ fold-change grouped by allele,
-    ordered by HLA locus then allele name.
+    Boxplot: distribution of per-allele log₂ FC, grouped by allele,
+    ordered by HLA locus then allele name.  Jittered individual points shown.
     """
-    enriched: List[Dict] = []
+    enriched = []
     for r in pa_rows:
         fc = _safe_float(r.get("log2_foldchange_BR", ""))
         mhc = r.get("MHC", "")
         if fc is None:
             continue
         allele_short = mhc.replace("HLA-", "").replace("HLA*", "")
-        hla_locus = ""
-        for ch in mhc:
-            if ch in ("A", "B", "C"):
-                hla_locus = ch
-                break
+        hla_locus = next((c for c in mhc if c in ("A", "B", "C")), "")
         enriched.append({"fc": fc, "allele_short": allele_short,
                          "HLA_locus": hla_locus})
 
     if not enriched:
         raise ValueError("No valid per-allele data found.")
 
-    # Allele order: locus then name
-    allele_meta = {}
+    allele_meta: Dict[str, str] = {}
     for r in enriched:
-        a = r["allele_short"]
-        if a not in allele_meta:
-            allele_meta[a] = r["HLA_locus"]
+        if r["allele_short"] not in allele_meta:
+            allele_meta[r["allele_short"]] = r["HLA_locus"]
     allele_order = sorted(allele_meta, key=lambda a: (allele_meta[a], a))
 
-    # Collect values per allele
     by_allele: Dict[str, List[float]] = {a: [] for a in allele_order}
     for r in enriched:
         by_allele[r["allele_short"]].append(r["fc"])
 
-    n_alleles = len(allele_order)
-    fig_width = max(8, n_alleles * 0.9 + 2)
-    fig = Figure(figsize=(fig_width, 5.0), dpi=100)
-    fig.patch.set_facecolor("#f5f5f7")
-    ax = fig.add_subplot(111)
+    all_fc = [r["fc"] for r in enriched]
+    y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
+
+    glw = pg.GraphicsLayoutWidget()
+    glw.setBackground("#f5f5f7")
+    p = glw.addPlot(row=0, col=0)
+    _style_plot(p)
+    p.setLabel("left", "log₂ FC Best Rank", color="#333333", size="8pt")
 
     rng = np.random.default_rng(42)
-    all_fc = [r["fc"] for r in enriched]
-    y_lim = max(abs(v) for v in all_fc) * 1.1 if all_fc else 3.0
+    box_pen = pg.mkPen("#444444", width=0.9)
+    median_pen = pg.mkPen("#222222", width=1.8)
 
     for i, allele in enumerate(allele_order):
         vals = np.array(by_allele[allele])
+        if len(vals) == 0:
+            continue
         locus = allele_meta[allele]
-        color = LOCUS_COLORS.get(locus, LOCUS_FALLBACK)
+        color = LOCUS_COLORS.get(locus, _LOCUS_FALLBACK)
 
-        # Boxplot (no fliers — we draw points ourselves)
-        bp = ax.boxplot(
-            vals, positions=[i], widths=0.5,
-            patch_artist=True, showfliers=False,
-            boxprops=dict(facecolor="none", color="#444444", linewidth=0.8),
-            whiskerprops=dict(color="#444444", linewidth=0.8),
-            capprops=dict(color="#444444", linewidth=0.8),
-            medianprops=dict(color="#333333", linewidth=1.2),
+        q1, q2, q3 = float(np.percentile(vals, 25)), float(np.percentile(vals, 50)), float(np.percentile(vals, 75))
+        iqr = q3 - q1
+        w_lo = max(float(vals.min()), q1 - 1.5 * iqr)
+        w_hi = min(float(vals.max()), q3 + 1.5 * iqr)
+
+        # Box (Q1 → Q3)
+        box = pg.BarGraphItem(
+            x=np.array([i]), y0=np.array([q1]), y1=np.array([q3]),
+            width=0.45,
+            brush=pg.mkBrush(200, 200, 200, 160),
+            pen=box_pen,
         )
+        p.addItem(box)
 
-        # Jittered points
-        jitter = rng.uniform(-0.15, 0.15, size=len(vals))
-        ax.scatter(i + jitter, vals, s=22, color=color, alpha=0.7,
-                   zorder=3, linewidths=0)
+        # Median line
+        p.plot([i - 0.225, i + 0.225], [q2, q2], pen=median_pen)
 
-    ax.axhline(0, linestyle="--", linewidth=0.6, color="#555555", zorder=2)
-    ax.set_xlim(-0.7, n_alleles - 0.3)
-    ax.set_ylim(-y_lim, y_lim)
-    ax.set_xticks(range(n_alleles))
-    ax.set_xticklabels(allele_order, rotation=90, ha="right", va="top", fontsize=8)
-    ax.set_ylabel("log₂ Fold Change Best Rank", fontsize=9)
-    ax.set_xlabel("Allele", fontsize=9)
-    ax.set_facecolor("white")
-    ax.tick_params(labelsize=8)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.5)
-        spine.set_color("#aaaaaa")
-    ax.grid(axis="y", linewidth=0.3, color="#eeeeee", zorder=0)
+        # Whiskers + caps
+        for y_end, y_base in [(w_hi, q3), (w_lo, q1)]:
+            p.plot([i, i], [y_base, y_end], pen=box_pen)
+            p.plot([i - 0.1, i + 0.1], [y_end, y_end], pen=box_pen)
 
-    # Locus legend
-    handles = [Patch(facecolor=LOCUS_COLORS.get(l, LOCUS_FALLBACK), label=l)
-               for l in ("A", "B", "C")]
-    ax.legend(handles=handles, title="HLA locus", fontsize=8,
-              title_fontsize=8, loc="upper right",
-              frameon=True, framealpha=0.9, edgecolor="#cccccc")
-
-    fig.suptitle("Per-Allele log₂ Fold Change — Distribution by Allele",
-                 fontsize=10, y=0.97)
-    fig.subplots_adjust(left=0.10, right=0.97, bottom=0.28, top=0.91)
-    return fig
-
-
-# ── Scrollable canvas widget ──────────────────────────────────────────────────
-
-class _PlotCanvas(QScrollArea):
-    """A scrollable area containing one FigureCanvas."""
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self._fig: Optional["Figure"] = None
-        self._show_placeholder("No data loaded.")
-
-    def set_figure(self, fig: "Figure") -> None:
-        if self._fig is not None:
-            try:
-                self._fig.clf()
-            except Exception:
-                pass
-        self._fig = fig
-        canvas = FigureCanvas(fig)
-        canvas.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        # Jittered individual points
+        jitter = rng.uniform(-0.14, 0.14, size=len(vals))
+        scatter = pg.ScatterPlotItem(
+            x=np.full(len(vals), i) + jitter,
+            y=vals,
+            size=5,
+            pen=pg.mkPen(None),
+            brush=pg.mkBrush(*_hex_to_rgba(color, 190)),
         )
-        # Minimum size from figure dimensions so scrollbars appear as needed
-        w_px = int(fig.get_figwidth() * fig.dpi)
-        h_px = int(fig.get_figheight() * fig.dpi)
-        canvas.setMinimumSize(w_px, h_px)
-        self.setWidget(canvas)
-        self.setWidgetResizable(False)
-        canvas.draw()
+        p.addItem(scatter)
 
-    def show_error(self, msg: str) -> None:
-        lbl = QLabel(msg)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("color: #ff3b30; font-size: 12px; padding: 24px;")
-        self._set_label(lbl)
+    # y = 0 line
+    p.addItem(pg.InfiniteLine(
+        pos=0, angle=0,
+        pen=pg.mkPen("#555555", width=1, style=Qt.PenStyle.DashLine),
+    ))
 
-    def _show_placeholder(self, msg: str) -> None:
-        lbl = QLabel(msg)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("color: #8e8e93; font-size: 12px; padding: 24px;")
-        self._set_label(lbl)
+    ticks = [[(i, allele_order[i]) for i in range(len(allele_order))]]
+    ax = p.getAxis("bottom")
+    ax.setTicks(ticks)
+    ax.setStyle(tickTextAngle=-90, tickTextOffset=2, tickFont=_small_font())
 
-    def _set_label(self, lbl: QLabel) -> None:
-        self.setWidget(lbl)
-        self.setWidgetResizable(True)
+    p.setXRange(-0.65, len(allele_order) - 0.35, padding=0)
+    p.setYRange(-y_lim, y_lim, padding=0)
+
+    return glw
+
+
+# ── Font helper ───────────────────────────────────────────────────────────────
+
+def _small_font():
+    from PyQt6.QtGui import QFont
+    f = QFont()
+    f.setPointSize(7)
+    return f
+
+
+# ── Panel wrapper (plot widget + save button) ─────────────────────────────────
+
+def _make_panel(
+    pg_widget: "pg.GraphicsLayoutWidget",
+    save_stem: str,
+    hint: str = "Scroll to zoom · Drag to pan · Right-click for export",
+) -> QWidget:
+    """
+    Wrap a pyqtgraph widget in a container with a hint label and Save button.
+    """
+    panel = QWidget()
+    vbox = QVBoxLayout(panel)
+    vbox.setContentsMargins(0, 0, 0, 0)
+    vbox.setSpacing(4)
+
+    # Controls row
+    ctrl = QHBoxLayout()
+    ctrl.setContentsMargins(8, 4, 8, 2)
+
+    hint_lbl = QLabel(hint)
+    hint_lbl.setObjectName("lbl_info")
+    hint_lbl.setStyleSheet("font-size: 11px; color: #8e8e93;")
+
+    save_btn = QPushButton("Save plot…")
+    save_btn.setObjectName("btn_outline")
+    save_btn.setFixedHeight(28)
+
+    ctrl.addWidget(hint_lbl)
+    ctrl.addStretch()
+    ctrl.addWidget(save_btn)
+
+    vbox.addLayout(ctrl)
+    vbox.addWidget(pg_widget, 1)
+
+    def _save():
+        default = Path.home() / f"{save_stem}.png"
+        dest, _ = QFileDialog.getSaveFileName(
+            panel, "Save plot", str(default),
+            "PNG image (*.png);;SVG vector (*.svg)",
+        )
+        if not dest:
+            return
+        try:
+            if dest.lower().endswith(".svg"):
+                exp = pg.exporters.SVGExporter(pg_widget.scene())
+            else:
+                exp = pg.exporters.ImageExporter(pg_widget.scene())
+                exp.parameters()["width"] = 2400
+            exp.export(dest)
+        except Exception as exc:
+            QMessageBox.critical(panel, "Save failed", str(exc))
+
+    save_btn.clicked.connect(_save)
+    return panel
+
+
+def _make_error_panel(msg: str) -> QWidget:
+    w = QWidget()
+    lbl = QLabel(msg)
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setWordWrap(True)
+    lbl.setStyleSheet("color: #ff3b30; font-size: 12px; padding: 24px;")
+    vbox = QVBoxLayout(w)
+    vbox.addWidget(lbl)
+    return w
+
+
+def _make_install_panel() -> QWidget:
+    w = QWidget()
+    lbl = QLabel(
+        "pyqtgraph is not installed.\n\n"
+        "Go to the Setup step and click\n"
+        '"Install Python plotting library" to enable plots.'
+    )
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setWordWrap(True)
+    lbl.setStyleSheet("color: #636366; font-size: 13px; padding: 32px;")
+    vbox = QVBoxLayout(w)
+    vbox.addWidget(lbl)
+    return w
 
 
 # ── Main PlotViewer widget ────────────────────────────────────────────────────
 
 class PlotViewer(QWidget):
     """
-    Tabbed plot viewer for CD8scape output files.
+    Tabbed interactive plot viewer for CD8scape output files.
 
-    Call load() after each analysis run to populate the plots.
+    Call load() after each run.  Tabs are added/removed dynamically:
+      • "Escape Scores"             — always present after a run
+      • "Percentile Scores"         — only when has_percentile=True
+      • "Per-Allele Escape Scores"  — only when has_per_allele=True
     """
-
-    TAB_HMBR     = 0
-    TAB_LOG2FC   = 1
-    TAB_SIM      = 2
-    TAB_PA_SCAT  = 3
-    TAB_PA_BOX   = 4
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -665,172 +722,136 @@ class PlotViewer(QWidget):
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
 
-        if not _MPL_OK:
-            notice = QLabel(
-                "matplotlib is not installed.\n\n"
-                "Run:  pip install matplotlib\n"
-                "then restart CD8scape to enable plot output."
-            )
-            notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            notice.setStyleSheet(
-                "color: #636366; font-size: 13px; padding: 32px;"
-            )
-            vbox.addWidget(notice)
+        if not _PG_OK:
+            vbox.addWidget(_make_install_panel())
             return
 
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
-
-        self._canvas_hmbr    = _PlotCanvas()
-        self._canvas_log2fc  = _PlotCanvas()
-        self._canvas_sim     = _PlotCanvas()
-        self._canvas_pa_scat = _PlotCanvas()
-        self._canvas_pa_box  = _PlotCanvas()
-
-        self._tabs.addTab(self._canvas_hmbr,    "HMBR")
-        self._tabs.addTab(self._canvas_log2fc,  "log₂ FC")
-        self._tabs.addTab(self._canvas_sim,     "Simulated")
-        self._tabs.addTab(self._canvas_pa_scat, "Per-Allele")
-        self._tabs.addTab(self._canvas_pa_box,  "Allele Box")
-
         vbox.addWidget(self._tabs)
-        self._reset_placeholders()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def load(
         self,
         folder: Optional[Path],
+        folder_name: str = "",
         run_suffix: str = "",
         sim_suffix: str = "simulated",
         has_per_allele: bool = False,
         has_percentile: bool = False,
     ) -> None:
-        """
-        Locate output CSVs inside *folder* and render all available plots.
-
-        Parameters
-        ----------
-        folder        : data folder used for this run
-        run_suffix    : --suffix value used for the observed run (may be "")
-        sim_suffix    : --suffix used for the simulate step (default "simulated")
-        has_per_allele: True if --per-allele was requested
-        has_percentile: True if percentile analysis was run
-        """
-        if not _MPL_OK:
+        if not _PG_OK:
             return
+
+        self._tabs.clear()
+
         if folder is None or not folder.is_dir():
-            self._reset_placeholders("No output folder available.")
+            self._tabs.addTab(_make_error_panel("No output folder available."),
+                              "Escape Scores")
             return
 
-        # ── Locate files ──────────────────────────────────────────────────────
-        hmbr_path    = _find_file(folder, "harmonic_mean_best_ranks", run_suffix)
-        sim_path     = _find_file(folder, "harmonic_mean_best_ranks", sim_suffix) \
-                       if has_percentile else None
-        pa_path      = _find_file(folder, "per_allele_best_ranks", run_suffix) \
-                       if has_per_allele else None
+        fname = folder_name or folder.name
 
-        # ── Load observed HMBR ────────────────────────────────────────────────
-        obs_rows: List[Dict] = []
-        if hmbr_path and hmbr_path.exists():
-            try:
-                obs_rows = _load_csv(hmbr_path)
-            except Exception as exc:
-                self._set_all_error(f"Could not read {hmbr_path.name}:\n{exc}")
-                return
-        else:
-            self._reset_placeholders(
-                "harmonic_mean_best_ranks.csv not found.\n"
-                "Run an analysis first."
+        # Standardised filename stem helpers
+        suffix_part = f"_{run_suffix}" if run_suffix else ""
+        sim_part    = f"_{sim_suffix}" if sim_suffix else "_simulated"
+
+        def stem(plot_type: str, s: str = suffix_part) -> str:
+            return f"CD8scape_{plot_type}_{fname}{s}"
+
+        # ── Load observed HMBR CSV ────────────────────────────────────────
+        hmbr_path = _find_file(folder, "harmonic_mean_best_ranks", run_suffix)
+        if not (hmbr_path and hmbr_path.exists()):
+            self._tabs.addTab(
+                _make_error_panel(
+                    "harmonic_mean_best_ranks.csv not found.\n"
+                    "Run an analysis to generate output files."
+                ),
+                "Escape Scores",
             )
             return
 
-        # Pre-compute frame order from observed data (used by per-allele plots)
-        frame_order, _ = _frame_order_and_colors(obs_rows)
-
-        # ── HMBR plot ─────────────────────────────────────────────────────────
-        self._render_tab(self._canvas_hmbr, _render_hmbr, obs_rows)
-
-        # ── log₂ FC plot ──────────────────────────────────────────────────────
-        self._render_tab(self._canvas_log2fc, _render_log2fc, obs_rows)
-
-        # ── Simulated density plot ────────────────────────────────────────────
-        if has_percentile and sim_path and sim_path.exists():
-            try:
-                sim_rows = _load_csv(sim_path)
-            except Exception as exc:
-                self._canvas_sim.show_error(
-                    f"Could not read {sim_path.name}:\n{exc}"
-                )
-                sim_rows = []
-            if sim_rows:
-                self._render_tab(
-                    self._canvas_sim, _render_simulated, obs_rows, sim_rows
-                )
-        else:
-            self._canvas_sim._show_placeholder(
-                "Simulated background not available.\n"
-                "Enable percentile analysis to see this plot."
-            )
-
-        # ── Per-allele plots ──────────────────────────────────────────────────
-        if has_per_allele and pa_path and pa_path.exists():
-            try:
-                pa_rows = _load_csv(pa_path)
-            except Exception as exc:
-                msg = f"Could not read {pa_path.name}:\n{exc}"
-                self._canvas_pa_scat.show_error(msg)
-                self._canvas_pa_box.show_error(msg)
-                pa_rows = []
-            if pa_rows:
-                self._render_tab(
-                    self._canvas_pa_scat,
-                    _render_per_allele_scatter,
-                    pa_rows, frame_order,
-                )
-                self._render_tab(self._canvas_pa_box, _render_per_allele_box,
-                                 pa_rows)
-        else:
-            msg = (
-                "Per-allele data not available.\n"
-                "Enable --per-allele in Run options to see this plot."
-            )
-            self._canvas_pa_scat._show_placeholder(msg)
-            self._canvas_pa_box._show_placeholder(msg)
-
-    # ── Internal helpers ──────────────────────────────────────────────────────
-
-    def _render_tab(
-        self,
-        canvas: _PlotCanvas,
-        renderer,
-        *args,
-    ) -> None:
-        """Call renderer(*args) and push the resulting Figure into canvas."""
         try:
-            fig = renderer(*args)
-            canvas.set_figure(fig)
+            obs_rows = _load_csv(hmbr_path)
         except Exception as exc:
-            canvas.show_error(str(exc))
-
-    def _reset_placeholders(self, msg: str = "Run an analysis to see plots.") -> None:
-        if not _MPL_OK:
+            self._tabs.addTab(
+                _make_error_panel(f"Could not read {hmbr_path.name}:\n{exc}"),
+                "Escape Scores",
+            )
             return
-        for canvas in (
-            self._canvas_hmbr,
-            self._canvas_log2fc,
-            self._canvas_sim,
-            self._canvas_pa_scat,
-            self._canvas_pa_box,
-        ):
-            canvas._show_placeholder(msg)
 
-    def _set_all_error(self, msg: str) -> None:
-        for canvas in (
-            self._canvas_hmbr,
-            self._canvas_log2fc,
-            self._canvas_sim,
-            self._canvas_pa_scat,
-            self._canvas_pa_box,
-        ):
-            canvas.show_error(msg)
+        frame_order, frame_colors = _frame_order_and_colors(obs_rows)
+
+        # ── Tab 1 — Escape Scores ─────────────────────────────────────────
+        try:
+            glw = _build_escape_scores(obs_rows, frame_order, frame_colors)
+            tab = _make_panel(glw, stem("escape_scores"))
+        except Exception as exc:
+            tab = _make_error_panel(str(exc))
+        self._tabs.addTab(tab, "Escape Scores")
+
+        # ── Tab 2 — Percentile Scores (conditional) ───────────────────────
+        if has_percentile:
+            sim_path = _find_file(folder, "harmonic_mean_best_ranks", sim_suffix)
+            if sim_path and sim_path.exists():
+                try:
+                    sim_rows = _load_csv(sim_path)
+                    glw = _build_percentile_scores(obs_rows, sim_rows, frame_colors)
+                    tab = _make_panel(glw, stem("percentile_scores", sim_part))
+                except Exception as exc:
+                    tab = _make_error_panel(str(exc))
+            else:
+                tab = _make_error_panel(
+                    f"Simulated output not found ({sim_suffix}).\n"
+                    "Re-run with percentile analysis enabled."
+                )
+            self._tabs.addTab(tab, "Percentile Scores")
+
+        # ── Tab 3 — Per-Allele Escape Scores (conditional) ────────────────
+        if has_per_allele:
+            pa_path = _find_file(folder, "per_allele_best_ranks", run_suffix)
+            if pa_path and pa_path.exists():
+                try:
+                    pa_rows = _load_csv(pa_path)
+                    # Sub-tab widget
+                    pa_tabs = QTabWidget()
+                    pa_tabs.setDocumentMode(True)
+
+                    # Per-mutation scatter
+                    try:
+                        glw_scat = _build_per_allele_scatter(
+                            pa_rows, frame_order, frame_colors
+                        )
+                        pa_tabs.addTab(
+                            _make_panel(glw_scat,
+                                        stem("per_allele_escape_scores_per_mutation")),
+                            "Per Mutation",
+                        )
+                    except Exception as exc:
+                        pa_tabs.addTab(_make_error_panel(str(exc)), "Per Mutation")
+
+                    # By-allele boxplot
+                    try:
+                        glw_box = _build_per_allele_box(pa_rows)
+                        pa_tabs.addTab(
+                            _make_panel(glw_box,
+                                        stem("per_allele_escape_scores_by_allele")),
+                            "By Allele",
+                        )
+                    except Exception as exc:
+                        pa_tabs.addTab(_make_error_panel(str(exc)), "By Allele")
+
+                    tab = pa_tabs
+                except Exception as exc:
+                    tab = _make_error_panel(str(exc))
+            else:
+                tab = _make_error_panel(
+                    "per_allele_best_ranks.csv not found.\n"
+                    "Re-run with --per-allele enabled."
+                )
+            self._tabs.addTab(tab, "Per-Allele Escape Scores")
+
+    def reset(self) -> None:
+        if _PG_OK:
+            self._tabs.clear()
