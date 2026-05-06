@@ -329,9 +329,9 @@ def _build_escape_scores(
         n = len(mutations)
         abbrev = FRAME_ABBREVS.get(frame, frame)
 
-        p = glw.addPlot(row=0, col=col_i, title=abbrev,
-                        axisItems={"bottom": _RotatedAxisItem()})
+        p = glw.addPlot(row=0, col=col_i, title=abbrev)
         _style_plot(p)
+        _apply_bottom_axis_style(p)
         p.getViewBox().setMouseEnabled(x=False, y=False)
         p.setTitle(abbrev, color="#1d1d1f", size="9pt",
                    bold=True, italic=False)
@@ -372,7 +372,7 @@ def _build_escape_scores(
         )
         p.addItem(zero)
 
-        # x-axis: mutation names (rotated via _RotatedAxisItem)
+        # x-axis: mutation names (horizontal, auto-skip on overlap — zoom in to see more)
         ticks = [[(i, mutations[i].get("Mutation", "")) for i in range(n)]]
         p.getAxis("bottom").setTicks(ticks)
 
@@ -541,9 +541,9 @@ def _build_per_allele_scatter(
         mutations_data = grouped[frame]
         abbrev = FRAME_ABBREVS.get(frame, frame)
 
-        p = glw.addPlot(row=0, col=col_i,
-                        axisItems={"bottom": _RotatedAxisItem()})
+        p = glw.addPlot(row=0, col=col_i)
         _style_plot(p, title=abbrev)
+        _apply_bottom_axis_style(p)
         p.getViewBox().setMouseEnabled(x=False, y=False)
 
         n_muts = len({r.get("Mutation", "") for r in mutations_data})
@@ -633,8 +633,9 @@ def _build_per_allele_box(pa_rows: List[Dict]) -> "pg.GraphicsLayoutWidget":
 
     glw = _PassthroughGLW()
     glw.setBackground("#f5f5f7")
-    p = glw.addPlot(row=0, col=0, axisItems={"bottom": _RotatedAxisItem()})
+    p = glw.addPlot(row=0, col=0)
     _style_plot(p)
+    _apply_bottom_axis_style(p)
     p.getViewBox().setMouseEnabled(x=False, y=False)
     p.setLabel("left", "log₂ FC Best Rank", color="#333333", size="8pt")
 
@@ -706,60 +707,16 @@ def _small_font():
     return f
 
 
-# ── Rotated bottom-axis labels ────────────────────────────────────────────────
+def _apply_bottom_axis_style(plot_item: "pg.PlotItem") -> None:
+    """Apply a small tick font to the bottom axis.
 
-class _RotatedAxisItem(pg.AxisItem):
+    pyqtgraph will automatically skip labels that would overlap, so the plot
+    stays readable at default zoom and more labels appear as the user zooms in.
     """
-    Bottom AxisItem that draws tick labels rotated -90° so they don't overlap.
-
-    pyqtgraph's setStyle() does not accept 'tickTextAngle', so we subclass
-    and override drawPicture() to rotate each label ourselves.
-    """
-    _LABEL_PX = 68  # vertical space reserved for rotated labels
-
-    def __init__(self, **kwargs):
-        kwargs["orientation"] = "bottom"
-        super().__init__(**kwargs)
-        self.setStyle(tickTextHeight=self._LABEL_PX, tickTextOffset=2,
-                      tickFont=_small_font())
-
-    def drawPicture(self, p, axisSpec, tickSpecs, textSpecs):
-        from PyQt6.QtCore import QRectF
-        p.setRenderHint(p.RenderHint.Antialiasing, False)
-        p.setRenderHint(p.RenderHint.TextAntialiasing, True)
-
-        # Axis line
-        pen, pt1, pt2 = axisSpec
-        p.setPen(pen)
-        p.drawLine(pt1, pt2)
-
-        # Tick marks
-        for pen, pt1, pt2 in tickSpecs:
-            p.setPen(pen)
-            p.drawLine(pt1, pt2)
-
-        # Rotated labels
-        # After rotate(-90°) [clockwise], +x in the rotated frame maps to
-        # +y in screen coords (downward), which is INTO the reserved text
-        # area below the axis.  Negative x would go upward into the plot —
-        # that was the "floating" bug.  Fix: translate to just below the
-        # tick mark end and draw in the +x direction.
-        if self.style.get("showValues", True):
-            font = self.style.get("tickFont") or self.font()
-            p.setFont(font)
-            p.setPen(self.textPen())
-            draw_w = self._LABEL_PX - 4
-            for rect, _flags, text in textSpecs:
-                p.save()
-                p.translate(rect.center().x(), rect.top() + 2)
-                p.rotate(-90)
-                # +x here = downward in original = into the reserved area ✓
-                p.drawText(
-                    QRectF(0, -rect.width() / 2, draw_w, rect.width()),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    text,
-                )
-                p.restore()
+    plot_item.getAxis("bottom").setStyle(
+        tickFont=_small_font(),
+        tickTextOffset=3,
+    )
 
 
 # ── Scroll + zoom container ───────────────────────────────────────────────────
@@ -875,6 +832,11 @@ def _make_panel(
     zoom_in_btn.setFixedSize(26, 26)
     zoom_in_btn.setObjectName("btn_outline")
 
+    reset_btn = QPushButton("Reset")
+    reset_btn.setObjectName("btn_outline")
+    reset_btn.setFixedHeight(26)
+    reset_btn.setToolTip("Reset zoom to 100%")
+
     save_btn = QPushButton("Save plot…")
     save_btn.setObjectName("btn_outline")
     save_btn.setFixedHeight(26)
@@ -884,6 +846,8 @@ def _make_panel(
     ctrl.addWidget(zoom_out_btn)
     ctrl.addWidget(zoom_lbl)
     ctrl.addWidget(zoom_in_btn)
+    ctrl.addSpacing(6)
+    ctrl.addWidget(reset_btn)
     ctrl.addSpacing(10)
     ctrl.addWidget(save_btn)
 
@@ -900,6 +864,7 @@ def _make_panel(
 
     zoom_in_btn.clicked.connect(lambda: _apply(scroll.zoom_level() * 1.3))
     zoom_out_btn.clicked.connect(lambda: _apply(scroll.zoom_level() / 1.3))
+    reset_btn.clicked.connect(lambda: _apply(1.0))
 
     # Patch _ZoomScrollArea to also update the label on Ctrl+scroll
     _orig_apply = scroll._apply_zoom
