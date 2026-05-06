@@ -738,21 +738,25 @@ class _RotatedAxisItem(pg.AxisItem):
             p.setPen(pen)
             p.drawLine(pt1, pt2)
 
-        # Rotated labels — pivot around the top-centre of each text rect
+        # Rotated labels
+        # After rotate(-90°) [clockwise], +x in the rotated frame maps to
+        # +y in screen coords (downward), which is INTO the reserved text
+        # area below the axis.  Negative x would go upward into the plot —
+        # that was the "floating" bug.  Fix: translate to just below the
+        # tick mark end and draw in the +x direction.
         if self.style.get("showValues", True):
             font = self.style.get("tickFont") or self.font()
             p.setFont(font)
             p.setPen(self.textPen())
+            draw_w = self._LABEL_PX - 4
             for rect, _flags, text in textSpecs:
                 p.save()
-                p.translate(rect.center().x(), rect.top())
+                p.translate(rect.center().x(), rect.top() + 2)
                 p.rotate(-90)
-                # After -90° rotation the label extends leftward;
-                # right-align so the end of the text sits near the tick.
+                # +x here = downward in original = into the reserved area ✓
                 p.drawText(
-                    QRectF(-(self._LABEL_PX - 2), -rect.width() / 2,
-                           self._LABEL_PX - 2, rect.width()),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    QRectF(0, -rect.width() / 2, draw_w, rect.width()),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     text,
                 )
                 p.restore()
@@ -811,7 +815,10 @@ class _ZoomScrollArea(QScrollArea):
         super().showEvent(ev)
         if not self._initialised:
             self._initialised = True
-            self._apply_zoom(1.0)
+            # Defer one event-loop tick so the layout has time to assign
+            # the viewport its final size before we call setFixedSize.
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._apply_zoom(1.0))
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
@@ -851,11 +858,11 @@ def _make_panel(
     ctrl = QHBoxLayout()
     ctrl.setContentsMargins(8, 4, 8, 4)
 
-    hint_lbl = QLabel("Scroll to pan · Ctrl+scroll or ＋/－ to zoom")
+    hint_lbl = QLabel("Scroll to pan  ·  Ctrl+scroll or +/− to zoom")
     hint_lbl.setObjectName("lbl_info")
     hint_lbl.setStyleSheet("font-size: 11px; color: #8e8e93;")
 
-    zoom_out_btn = QPushButton("－")
+    zoom_out_btn = QPushButton("−")   # ASCII-safe minus sign
     zoom_out_btn.setFixedSize(26, 26)
     zoom_out_btn.setObjectName("btn_outline")
 
@@ -864,7 +871,7 @@ def _make_panel(
     zoom_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
     zoom_lbl.setStyleSheet("font-size: 11px; color: #555;")
 
-    zoom_in_btn = QPushButton("＋")
+    zoom_in_btn = QPushButton("+")
     zoom_in_btn.setFixedSize(26, 26)
     zoom_in_btn.setObjectName("btn_outline")
 
