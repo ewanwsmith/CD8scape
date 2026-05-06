@@ -49,16 +49,28 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-# ── pyqtgraph ─────────────────────────────────────────────────────────────────
+# ── pyqtgraph — lazy import so pip-install mid-session works immediately ───────
 _PG_OK = False
-try:
-    import pyqtgraph as pg
-    import pyqtgraph.exporters  # ensure exporters are registered
+pg = None  # type: ignore[assignment]
 
-    pg.setConfigOptions(antialias=True, background="#ffffff")
-    _PG_OK = True
-except ImportError:
-    pass
+def _ensure_pg() -> bool:
+    """Try to import pyqtgraph (and its exporters).  Safe to call repeatedly."""
+    global _PG_OK, pg
+    if _PG_OK:
+        return True
+    try:
+        import importlib, importlib.util
+        importlib.invalidate_caches()
+        import pyqtgraph as _pg
+        import pyqtgraph.exporters  # noqa: F401 — registers exporters
+        _pg.setConfigOptions(antialias=True, background="#ffffff")
+        pg = _pg
+        _PG_OK = True
+    except ImportError:
+        pass
+    return _PG_OK
+
+_ensure_pg()  # attempt at startup; succeeds if already installed
 
 # ── Column tooltips exported to app_qt.py ─────────────────────────────────────
 COLUMN_TOOLTIPS: Dict[str, str] = {
@@ -741,7 +753,12 @@ class PlotViewer(QWidget):
         has_per_allele: bool = False,
         has_percentile: bool = False,
     ) -> None:
+        # Re-attempt import in case pyqtgraph was just installed this session
+        _ensure_pg()
+
         if not _PG_OK:
+            self._tabs.clear()
+            self._tabs.addTab(_make_install_panel(), "Escape Scores")
             return
 
         self._tabs.clear()

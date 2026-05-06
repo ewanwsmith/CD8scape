@@ -1106,9 +1106,19 @@ class SetupPage(QWidget):
     def _pg_install_done(self, ok: bool) -> None:
         self._pg_install_btn.setText("Install plotting library")
         if ok:
-            self._pg_status.setText("✓ pyqtgraph installed — restart the app to enable plots")
+            self._pg_status.setText("✓ pyqtgraph installed")
             self._pg_status.setObjectName("lbl_ok")
             self._pg_install_btn.setEnabled(False)
+            # Re-render any existing plots immediately — no restart needed
+            op = self._app.output_page
+            op._plot_viewer.load(
+                folder=op._folder,
+                folder_name=op._folder.name if op._folder else "",
+                run_suffix=op._snap_run_suffix,
+                sim_suffix=op._snap_sim_suffix,
+                has_per_allele=op._snap_per_allele,
+                has_percentile=op._snap_include_pct,
+            )
         else:
             self._pg_status.setText("✗ Installation failed — try: pip install pyqtgraph")
             self._pg_status.setObjectName("lbl_err")
@@ -2046,7 +2056,9 @@ class OutputPage(QWidget):
         super().__init__()
         self._app = app
         self._output_files: List[Path] = []
+        self._folder: Optional[Path] = None
         self._snap_run_suffix: str = ""
+        self._snap_sim_suffix: str = ""
         self._snap_per_allele: bool = False
         self._snap_include_pct: bool = False
         self._snap_pct_per_allele: bool = False
