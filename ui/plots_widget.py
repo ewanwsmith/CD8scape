@@ -236,9 +236,9 @@ def _style_plot(p: "pg.PlotItem", title: str = "") -> None:
     p.getAxis("bottom").setTextPen(pg.mkPen("#333333"))
     p.getAxis("left").setTextPen(pg.mkPen("#333333"))
     p.showGrid(x=False, y=True, alpha=0.12)
-    # Enable ViewBox pan/zoom (left-drag = pan, scroll = zoom)
-    vb = p.getViewBox()
-    vb.setMouseMode(pg.ViewBox.PanMode)
+    # Mouse interaction is disabled per-ViewBox; zoom/pan is handled by
+    # the outer _ZoomableGLW scene transform.
+    p.getViewBox().setMouseMode(pg.ViewBox.PanMode)
 
 
 # ── Plot builders ─────────────────────────────────────────────────────────────
@@ -261,7 +261,7 @@ def _build_escape_scores(
               for r in rows if _safe_float(r.get("log2_foldchange_HMBR", "")) is not None]
     y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
 
-    glw = pg.GraphicsLayoutWidget()
+    glw = _ZoomableGLW()
     glw.setBackground("#f5f5f7")
 
     first_plot = None
@@ -270,8 +270,10 @@ def _build_escape_scores(
         n = len(mutations)
         abbrev = FRAME_ABBREVS.get(frame, frame)
 
-        p = glw.addPlot(row=0, col=col_i, title=abbrev)
+        p = glw.addPlot(row=0, col=col_i, title=abbrev,
+                        axisItems={"bottom": _RotatedAxisItem()})
         _style_plot(p)
+        p.getViewBox().setMouseEnabled(x=False, y=False)
         p.setTitle(abbrev, color="#1d1d1f", size="9pt",
                    bold=True, italic=False)
 
@@ -302,12 +304,9 @@ def _build_escape_scores(
         )
         p.addItem(zero)
 
-        # x-axis: mutation names, rotated
+        # x-axis: mutation names (rotated via _RotatedAxisItem)
         ticks = [[(i, mutations[i].get("Mutation", "")) for i in range(n)]]
-        ax_bot = p.getAxis("bottom")
-        ax_bot.setTicks(ticks)
-        ax_bot.setStyle(tickTextAngle=-90, tickTextOffset=2,
-                        tickFont=_small_font())
+        p.getAxis("bottom").setTicks(ticks)
 
         p.setXRange(-0.6, n - 0.4, padding=0)
         p.setYRange(-y_lim, y_lim, padding=0)
@@ -366,7 +365,7 @@ def _build_percentile_scores(
     y_full = _gaussian_kde(sim_vals, x_full)
     y_max = float(y_full.max())
 
-    glw = pg.GraphicsLayoutWidget()
+    glw = _ZoomableGLW()
     glw.setBackground("#f5f5f7")
 
     for idx, r in enumerate(candidates):
@@ -382,6 +381,7 @@ def _build_percentile_scores(
         title = f"{mutation}  ({abbrev})"
         p = glw.addPlot(row=row_i, col=col_i, title=title)
         _style_plot(p)
+        p.getViewBox().setMouseEnabled(x=False, y=False)
         p.setTitle(title, color="#1d1d1f", size="8pt")
 
         color_hex = frame_colors.get(frame, "#440154")
@@ -460,7 +460,7 @@ def _build_per_allele_scatter(
 
     rng = np.random.default_rng(42)
 
-    glw = pg.GraphicsLayoutWidget()
+    glw = _ZoomableGLW()
     glw.setBackground("#f5f5f7")
 
     first_plot = None
@@ -468,8 +468,10 @@ def _build_per_allele_scatter(
         mutations_data = grouped[frame]
         abbrev = FRAME_ABBREVS.get(frame, frame)
 
-        p = glw.addPlot(row=0, col=col_i)
+        p = glw.addPlot(row=0, col=col_i,
+                        axisItems={"bottom": _RotatedAxisItem()})
         _style_plot(p, title=abbrev)
+        p.getViewBox().setMouseEnabled(x=False, y=False)
 
         n_muts = len({r.get("Mutation", "") for r in mutations_data})
         glw.ci.layout.setColumnStretchFactor(col_i, max(1, n_muts))
@@ -508,9 +510,7 @@ def _build_per_allele_scatter(
         ))
 
         ticks = [[(i, mut_order[i]) for i in range(len(mut_order))]]
-        ax = p.getAxis("bottom")
-        ax.setTicks(ticks)
-        ax.setStyle(tickTextAngle=-90, tickTextOffset=2, tickFont=_small_font())
+        p.getAxis("bottom").setTicks(ticks)
 
         p.setXRange(-0.65, len(mut_order) - 0.35, padding=0)
         p.setYRange(-y_lim, y_lim, padding=0)
@@ -558,10 +558,11 @@ def _build_per_allele_box(pa_rows: List[Dict]) -> "pg.GraphicsLayoutWidget":
     all_fc = [r["fc"] for r in enriched]
     y_lim = max(abs(v) for v in all_fc) * 1.12 if all_fc else 3.0
 
-    glw = pg.GraphicsLayoutWidget()
+    glw = _ZoomableGLW()
     glw.setBackground("#f5f5f7")
-    p = glw.addPlot(row=0, col=0)
+    p = glw.addPlot(row=0, col=0, axisItems={"bottom": _RotatedAxisItem()})
     _style_plot(p)
+    p.getViewBox().setMouseEnabled(x=False, y=False)
     p.setLabel("left", "log₂ FC Best Rank", color="#333333", size="8pt")
 
     rng = np.random.default_rng(42)
@@ -615,9 +616,7 @@ def _build_per_allele_box(pa_rows: List[Dict]) -> "pg.GraphicsLayoutWidget":
     ))
 
     ticks = [[(i, allele_order[i]) for i in range(len(allele_order))]]
-    ax = p.getAxis("bottom")
-    ax.setTicks(ticks)
-    ax.setStyle(tickTextAngle=-90, tickTextOffset=2, tickFont=_small_font())
+    p.getAxis("bottom").setTicks(ticks)
 
     p.setXRange(-0.65, len(allele_order) - 0.35, padding=0)
     p.setYRange(-y_lim, y_lim, padding=0)
@@ -634,12 +633,101 @@ def _small_font():
     return f
 
 
+# ── Rotated bottom-axis labels ────────────────────────────────────────────────
+
+class _RotatedAxisItem(pg.AxisItem):
+    """
+    Bottom AxisItem that draws tick labels rotated -90° so they don't overlap.
+
+    pyqtgraph's setStyle() does not accept 'tickTextAngle', so we subclass
+    and override drawPicture() to rotate each label ourselves.
+    """
+    _LABEL_PX = 68  # vertical space reserved for rotated labels
+
+    def __init__(self, **kwargs):
+        kwargs["orientation"] = "bottom"
+        super().__init__(**kwargs)
+        self.setStyle(tickTextHeight=self._LABEL_PX, tickTextOffset=2,
+                      tickFont=_small_font())
+
+    def drawPicture(self, p, axisSpec, tickSpecs, textSpecs):
+        from PyQt6.QtCore import QRectF
+        p.setRenderHint(p.RenderHint.Antialiasing, False)
+        p.setRenderHint(p.RenderHint.TextAntialiasing, True)
+
+        # Axis line
+        pen, pt1, pt2 = axisSpec
+        p.setPen(pen)
+        p.drawLine(pt1, pt2)
+
+        # Tick marks
+        for pen, pt1, pt2 in tickSpecs:
+            p.setPen(pen)
+            p.drawLine(pt1, pt2)
+
+        # Rotated labels — pivot around the top-centre of each text rect
+        if self.style.get("showValues", True):
+            font = self.style.get("tickFont") or self.font()
+            p.setFont(font)
+            p.setPen(self.textPen())
+            for rect, _flags, text in textSpecs:
+                p.save()
+                p.translate(rect.center().x(), rect.top())
+                p.rotate(-90)
+                # After -90° rotation the label extends leftward;
+                # right-align so the end of the text sits near the tick.
+                p.drawText(
+                    QRectF(-(self._LABEL_PX - 2), -rect.width() / 2,
+                           self._LABEL_PX - 2, rect.width()),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    text,
+                )
+                p.restore()
+
+
+# ── Pane-level zoom/pan container ─────────────────────────────────────────────
+
+class _ZoomableGLW(pg.GraphicsLayoutWidget):
+    """
+    GraphicsLayoutWidget where the scroll wheel zooms the *entire* scene
+    rather than individual sub-plot ViewBoxes.
+
+    All ViewBoxes inside should have setMouseEnabled(False) so they don't
+    swallow wheel or drag events.
+    """
+    _MIN_ZOOM = 0.15
+    _MAX_ZOOM = 6.0
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self._cur_zoom = 1.0
+        from PyQt6.QtWidgets import QGraphicsView
+        self.setTransformationAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(
+            QGraphicsView.ViewportAnchor.AnchorViewCenter)
+
+    def wheelEvent(self, ev):
+        dy = ev.angleDelta().y()
+        if dy == 0:
+            # Horizontal trackpad scroll → let Qt pan normally
+            from PyQt6.QtWidgets import QGraphicsView
+            QGraphicsView.wheelEvent(self, ev)
+            return
+        factor = 1.13 if dy > 0 else 1.0 / 1.13
+        new_zoom = max(self._MIN_ZOOM,
+                       min(self._MAX_ZOOM, self._cur_zoom * factor))
+        self.scale(new_zoom / self._cur_zoom, new_zoom / self._cur_zoom)
+        self._cur_zoom = new_zoom
+        ev.accept()
+
+
 # ── Panel wrapper (plot widget + save button) ─────────────────────────────────
 
 def _make_panel(
     pg_widget: "pg.GraphicsLayoutWidget",
     save_stem: str,
-    hint: str = "Scroll to zoom · Drag to pan · Right-click for export",
+    hint: str = "Scroll to zoom · Drag to pan",
 ) -> QWidget:
     """
     Wrap a pyqtgraph widget in a container with a hint label and Save button.
