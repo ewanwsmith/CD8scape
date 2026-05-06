@@ -125,6 +125,7 @@ from runner import (
 )
 from setup import check_env, read_netmhcpan_path, validate_netmhcpan, write_netmhcpan_path
 from workflow import PREP_CHOICES, RUN_CHOICES, WorkflowChoice, choice_by_key
+from plots_widget import PlotViewer
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1988,10 +1989,14 @@ class OutputPage(QWidget):
         vbox.addWidget(hdr)
         vbox.addWidget(_sep())
 
-        # ── Body: file list (left) + preview (right) ──────────────────────
-        body = QWidget()
-        body.setObjectName("page_root")
-        body_h = QHBoxLayout(body)
+        # ── Body: "Files" tab + "Plots" tab ──────────────────────────────
+        self._body_tabs = QTabWidget()
+        self._body_tabs.setDocumentMode(True)
+
+        # ── Tab 0 — Files (file list + preview) ──────────────────────────
+        files_widget = QWidget()
+        files_widget.setObjectName("page_root")
+        body_h = QHBoxLayout(files_widget)
         body_h.setContentsMargins(40, 20, 40, 20)
         body_h.setSpacing(20)
 
@@ -2084,7 +2089,20 @@ class OutputPage(QWidget):
 
         body_h.addLayout(left, 2)
         body_h.addLayout(right, 3)
-        vbox.addWidget(body, 1)
+
+        self._body_tabs.addTab(files_widget, "Files")
+
+        # ── Tab 1 — Plots ─────────────────────────────────────────────────
+        plots_outer = QWidget()
+        plots_outer.setObjectName("page_root")
+        plots_vbox = QVBoxLayout(plots_outer)
+        plots_vbox.setContentsMargins(16, 12, 16, 12)
+        plots_vbox.setSpacing(0)
+        self._plot_viewer = PlotViewer(plots_outer)
+        plots_vbox.addWidget(self._plot_viewer)
+        self._body_tabs.addTab(plots_outer, "Plots")
+
+        vbox.addWidget(self._body_tabs, 1)
 
         # Wire preview on selection change
         self._output_list.currentItemChanged.connect(self._update_preview)
@@ -2124,6 +2142,17 @@ class OutputPage(QWidget):
 
         self._populate_file_list()
         self._parse_and_show_fates()
+
+        # Render plots in the Plots tab
+        self._plot_viewer.load(
+            folder=folder,
+            run_suffix=snap_run_suffix,
+            sim_suffix=(snap_sim_suffix if snap_include_pct else ""),
+            has_per_allele=snap_per_allele,
+            has_percentile=snap_include_pct,
+        )
+        # Switch to the Plots tab automatically so the user sees the results
+        self._body_tabs.setCurrentIndex(1)
 
     # ── File list population ──────────────────────────────────────────────
 
