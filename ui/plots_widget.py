@@ -174,6 +174,21 @@ LOCUS_COLORS: Dict[str, str] = {
 }
 _LOCUS_FALLBACK = "#888888"
 
+# Inline stylesheet for the small toolbar buttons inside each plot panel.
+# The global QPushButton rule in app_qt.py uses padding: 7px 18px, which
+# completely swamps the fixed 26–28 px dimensions of these buttons and
+# causes the label text to be clipped (or invisible).  Overriding here
+# keeps their appearance consistent with btn_outline but with compact padding.
+_TOOLBAR_BTN_CSS = (
+    "QPushButton {"
+    " background-color: #ffffff; color: #0071e3;"
+    " border: 1.5px solid #0071e3; border-radius: 6px;"
+    " padding: 2px 8px; font-size: 12px;"
+    "}"
+    "QPushButton:hover { background-color: #f0f7ff; }"
+    "QPushButton:disabled { color: #a8a8ae; border-color: #a8a8ae; }"
+)
+
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -820,8 +835,9 @@ def _make_panel(
     hint_lbl.setStyleSheet("font-size: 11px; color: #8e8e93;")
 
     zoom_out_btn = QPushButton("−")   # ASCII-safe minus sign
-    zoom_out_btn.setFixedSize(26, 26)
+    zoom_out_btn.setFixedSize(28, 28)
     zoom_out_btn.setObjectName("btn_outline")
+    zoom_out_btn.setStyleSheet(_TOOLBAR_BTN_CSS)
 
     zoom_lbl = QLabel("100%")
     zoom_lbl.setFixedWidth(42)
@@ -829,17 +845,20 @@ def _make_panel(
     zoom_lbl.setStyleSheet("font-size: 11px; color: #555;")
 
     zoom_in_btn = QPushButton("+")
-    zoom_in_btn.setFixedSize(26, 26)
+    zoom_in_btn.setFixedSize(28, 28)
     zoom_in_btn.setObjectName("btn_outline")
+    zoom_in_btn.setStyleSheet(_TOOLBAR_BTN_CSS)
 
     reset_btn = QPushButton("Reset")
     reset_btn.setObjectName("btn_outline")
-    reset_btn.setFixedHeight(26)
+    reset_btn.setFixedHeight(28)
+    reset_btn.setStyleSheet(_TOOLBAR_BTN_CSS)
     reset_btn.setToolTip("Reset zoom to 100%")
 
     save_btn = QPushButton("Save plot…")
     save_btn.setObjectName("btn_outline")
-    save_btn.setFixedHeight(26)
+    save_btn.setFixedHeight(28)
+    save_btn.setStyleSheet(_TOOLBAR_BTN_CSS)
 
     ctrl.addWidget(hint_lbl)
     ctrl.addStretch()

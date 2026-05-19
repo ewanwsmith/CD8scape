@@ -33,10 +33,10 @@ function process_peptides(folder_path::String)
     
     # Remove peptides containing stop codons (denoted by '*')
     df_filtered = filter(row -> !occursin(r"\*", row[1]), df_unique)
-    
+
     # Save the filtered DataFrame back to the same file
     CSV.write(file_path, df_filtered)
-    
+
     println("Unique peptides without stop codons have been filtered and saved to $(file_path)")
 end
 
