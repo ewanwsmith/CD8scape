@@ -125,6 +125,7 @@ from runner import (
 )
 from setup import check_env, read_netmhcpan_path, validate_netmhcpan, write_netmhcpan_path
 from workflow import PREP_CHOICES, RUN_CHOICES, WorkflowChoice, choice_by_key
+from plots_widget import PlotViewer, COLUMN_TOOLTIPS
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -969,6 +970,36 @@ class SetupPage(QWidget):
 
         vbox.addWidget(julia_box)
 
+        # ── Python plotting library (pyqtgraph) ───────────────────────────
+        pg_box = QGroupBox("Python plotting library")
+        pg_layout = QVBoxLayout(pg_box)
+        pg_note = QLabel(
+            "CD8scape uses pyqtgraph for interactive result plots. "
+            "If it is not already installed, click 'Install' to add it via pip."
+        )
+        pg_note.setWordWrap(True)
+        pg_note.setObjectName("lbl_info")
+        pg_layout.addWidget(pg_note)
+
+        pg_row = QHBoxLayout()
+        self._pg_install_btn = _btn("Install plotting library", "btn_outline")
+        self._pg_install_btn.setFixedWidth(240)
+        self._pg_install_btn.clicked.connect(self._install_pyqtgraph)
+
+        self._pg_status = QLabel("")
+        self._pg_status.setObjectName("lbl_info")
+
+        pg_row.addWidget(self._pg_install_btn)
+        pg_row.addSpacing(14)
+        pg_row.addWidget(self._pg_status)
+        pg_row.addStretch()
+        pg_layout.addLayout(pg_row)
+
+        vbox.addWidget(pg_box)
+
+        # Check whether pyqtgraph is already present and update the label
+        self._refresh_pg_status()
+
         vbox.addStretch()
 
         layout = QVBoxLayout(self)
@@ -1026,6 +1057,74 @@ class SetupPage(QWidget):
             self._perl_status.setObjectName("lbl_err")
         self._perl_status.style().unpolish(self._perl_status)
         self._perl_status.style().polish(self._perl_status)
+
+    def _refresh_pg_status(self) -> None:
+        """Check whether pyqtgraph is importable and update the status label."""
+        try:
+            import importlib
+            importlib.import_module("pyqtgraph")
+            self._pg_status.setText("✓ pyqtgraph installed")
+            self._pg_status.setObjectName("lbl_ok")
+            self._pg_install_btn.setEnabled(False)
+        except ImportError:
+            self._pg_status.setText("✗ Not installed — plots will be unavailable until installed")
+            self._pg_status.setObjectName("lbl_err")
+            self._pg_install_btn.setEnabled(True)
+        self._pg_status.style().unpolish(self._pg_status)
+        self._pg_status.style().polish(self._pg_status)
+
+    def _install_pyqtgraph(self) -> None:
+        """Run pip install pyqtgraph in a background thread."""
+        import subprocess as _sp
+
+        self._pg_install_btn.setEnabled(False)
+        self._pg_install_btn.setText("Installing…")
+        self._pg_status.setText("Installing pyqtgraph…")
+        self._pg_status.setObjectName("lbl_info")
+        self._pg_status.style().unpolish(self._pg_status)
+        self._pg_status.style().polish(self._pg_status)
+
+        class _PipThread(QThread):
+            done = pyqtSignal(bool)
+
+            def run(self):
+                try:
+                    result = _sp.run(
+                        [sys.executable, "-m", "pip", "install", "pyqtgraph",
+                         "--break-system-packages"],
+                        capture_output=True,
+                        timeout=120,
+                    )
+                    self.done.emit(result.returncode == 0)
+                except Exception:
+                    self.done.emit(False)
+
+        self._pg_thread = _PipThread(self)
+        self._pg_thread.done.connect(self._pg_install_done)
+        self._pg_thread.start()
+
+    def _pg_install_done(self, ok: bool) -> None:
+        self._pg_install_btn.setText("Install plotting library")
+        if ok:
+            self._pg_status.setText("✓ pyqtgraph installed")
+            self._pg_status.setObjectName("lbl_ok")
+            self._pg_install_btn.setEnabled(False)
+            # Re-render any existing plots immediately — no restart needed
+            op = self._app.output_page
+            op._plot_viewer.load(
+                folder=op._folder,
+                folder_name=op._folder.name if op._folder else "",
+                run_suffix=op._snap_run_suffix,
+                sim_suffix=op._snap_sim_suffix,
+                has_per_allele=op._snap_per_allele,
+                has_percentile=op._snap_include_pct,
+            )
+        else:
+            self._pg_status.setText("✗ Installation failed — try: pip install pyqtgraph")
+            self._pg_status.setObjectName("lbl_err")
+            self._pg_install_btn.setEnabled(True)
+        self._pg_status.style().unpolish(self._pg_status)
+        self._pg_status.style().polish(self._pg_status)
 
     def _run_prep(self) -> None:
         if self._install_thread and self._install_thread.isRunning():
@@ -1957,7 +2056,9 @@ class OutputPage(QWidget):
         super().__init__()
         self._app = app
         self._output_files: List[Path] = []
+        self._folder: Optional[Path] = None
         self._snap_run_suffix: str = ""
+        self._snap_sim_suffix: str = ""
         self._snap_per_allele: bool = False
         self._snap_include_pct: bool = False
         self._snap_pct_per_allele: bool = False
@@ -1988,10 +2089,14 @@ class OutputPage(QWidget):
         vbox.addWidget(hdr)
         vbox.addWidget(_sep())
 
-        # ── Body: file list (left) + preview (right) ──────────────────────
-        body = QWidget()
-        body.setObjectName("page_root")
-        body_h = QHBoxLayout(body)
+        # ── Body: "Files" tab + "Plots" tab ──────────────────────────────
+        self._body_tabs = QTabWidget()
+        self._body_tabs.setDocumentMode(True)
+
+        # ── Tab 0 — Files (file list + preview) ──────────────────────────
+        files_widget = QWidget()
+        files_widget.setObjectName("page_root")
+        body_h = QHBoxLayout(files_widget)
         body_h.setContentsMargins(40, 20, 40, 20)
         body_h.setSpacing(20)
 
@@ -2084,7 +2189,20 @@ class OutputPage(QWidget):
 
         body_h.addLayout(left, 2)
         body_h.addLayout(right, 3)
-        vbox.addWidget(body, 1)
+
+        self._body_tabs.addTab(files_widget, "Files")
+
+        # ── Tab 1 — Plots ─────────────────────────────────────────────────
+        plots_outer = QWidget()
+        plots_outer.setObjectName("page_root")
+        plots_vbox = QVBoxLayout(plots_outer)
+        plots_vbox.setContentsMargins(16, 12, 16, 12)
+        plots_vbox.setSpacing(0)
+        self._plot_viewer = PlotViewer(plots_outer)
+        plots_vbox.addWidget(self._plot_viewer)
+        self._body_tabs.addTab(plots_outer, "Plots")
+
+        vbox.addWidget(self._body_tabs, 1)
 
         # Wire preview on selection change
         self._output_list.currentItemChanged.connect(self._update_preview)
@@ -2124,6 +2242,18 @@ class OutputPage(QWidget):
 
         self._populate_file_list()
         self._parse_and_show_fates()
+
+        # Render plots in the Plots tab
+        self._plot_viewer.load(
+            folder=folder,
+            folder_name=folder.name if folder else "",
+            run_suffix=snap_run_suffix,
+            sim_suffix=(snap_sim_suffix if snap_include_pct else ""),
+            has_per_allele=snap_per_allele,
+            has_percentile=snap_include_pct,
+        )
+        # Switch to the Plots tab automatically so the user sees the results
+        self._body_tabs.setCurrentIndex(1)
 
     # ── File list population ──────────────────────────────────────────────
 
@@ -2281,6 +2411,14 @@ class OutputPage(QWidget):
         self._preview_table.setRowCount(len(data))
         self._preview_table.setColumnCount(len(headers))
         self._preview_table.setHorizontalHeaderLabels(headers)
+
+        # Apply hover-over tooltips from COLUMN_TOOLTIPS for any known column names
+        for col, label in enumerate(headers):
+            tip = COLUMN_TOOLTIPS.get(label)
+            if tip:
+                hdr_item = self._preview_table.horizontalHeaderItem(col)
+                if hdr_item:
+                    hdr_item.setToolTip(tip)
 
         for r, row in enumerate(data):
             for c, val in enumerate(row):

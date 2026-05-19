@@ -1,4 +1,7 @@
 # UI-only Python dependencies for CD8scape.
-# Kept deliberately tiny — Phase 1 only needs Streamlit.
 # Pins use >= so users on macOS/Linux/Windows can resolve a wheel.
 streamlit>=1.32,<2.0
+
+# Interactive plot viewer in the Output step (plots_widget.py).
+# pyqtgraph provides native PyQt6 zooming/panning with no extra event handling.
+pyqtgraph>=0.13
