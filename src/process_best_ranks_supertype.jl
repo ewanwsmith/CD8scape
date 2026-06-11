@@ -348,36 +348,6 @@ if !isempty(best_ranks)
         wmap = Dict(String(a) => f for (a, f) in zip(freq_df.allele, freq_df.frequency))
     end
 
-    # === DEBUG WEIGHTS START (remove this whole block when done debugging) ===
-    try
-        raw_preds = unique(String.(best_ranks.MHC))
-        norm_preds = unique(normalize_allele.(raw_preds))
-        weight_keys  = collect(keys(wmap))
-
-        # Show a few examples of raw -> normalized
-        nshow = min(5, length(raw_preds))
-        sample_pairs = [ raw_preds[i] * " -> " * normalize_allele(raw_preds[i]) for i in 1:nshow ]
-        println("DEBUG: Sample predicted alleles (raw -> normalized): ", sample_pairs)
-
-        # Show a few sample keys from the weight map
-        println("DEBUG: Sample weight keys: ", first(weight_keys, min(5, length(weight_keys))))
-
-        missing_in_panel = sort(setdiff(norm_preds, weight_keys))
-        matched = length(norm_preds) - length(missing_in_panel)
-        println("DEBUG weights: total alleles used (normalized) = $(length(norm_preds)), matched = $matched, missing = $(length(missing_in_panel))")
-
-        # Write unmatched alleles; keep columns the same length
-        debug_file = joinpath(folder_path, "debug_unmatched_alleles.csv")
-        CSV.write(debug_file, DataFrame(
-            Predicted_Allele = missing_in_panel,
-            Closest_Match_Key = fill("", length(missing_in_panel))  # placeholder
-        ))
-        println("DEBUG weights: wrote unmatched alleles to $debug_file")
-    catch e
-        println("DEBUG weights: failed to compute/report unmatched alleles: ", e)
-    end
-    # === DEBUG WEIGHTS END ===
-
     # Compute weighted harmonic mean per (Frame, Locus, Mutation, Peptide_Type)
     grouped = groupby(best_ranks, [:Frame, :Locus, :Mutation, :Peptide_Type])
     agg = combine(grouped) do sdf
@@ -406,9 +376,11 @@ if !isempty(best_ranks)
     removed_count = before_filter - nrow(pivot_df)
     println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
 
-    # Fold change V/C
-    pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
-    pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
+    # Fold change (Derived / Ancestral)
+    if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
+        pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
+        pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
+    end
 
     # Compute per-allele log2 fold change if requested
     if per_allele
@@ -436,8 +408,22 @@ if !isempty(best_ranks)
         end
     end
 
+    # Add best (lowest-rank) peptide sequence per (Locus, Mutation) for ancestral and derived
+    best_pep_A = combine(
+        groupby(filter(r -> r.Peptide_Type == "A", best_ranks), [:Locus, :Mutation]),
+        [:Best_EL_Rank, :Sequence] => ((r, s) -> s[argmin(r)]) => :BestPeptide_A
+    )
+    best_pep_D = combine(
+        groupby(filter(r -> r.Peptide_Type == "D", best_ranks), [:Locus, :Mutation]),
+        [:Best_EL_Rank, :Sequence] => ((r, s) -> s[argmin(r)]) => :BestPeptide_D
+    )
+    pivot_df = leftjoin(pivot_df, best_pep_A, on = [:Locus, :Mutation])
+    pivot_df = leftjoin(pivot_df, best_pep_D, on = [:Locus, :Mutation])
+
     # Reorder columns to requested schema
-    output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
+    output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :BestPeptide_A, :HMBR_D, :BestPeptide_D, :foldchange_HMBR, :log2_foldchange_HMBR]
+    # Only select columns that actually exist (HMBR_A/D may be absent if one type is missing)
+    output_cols = filter(c -> string(c) in names(pivot_df), output_cols)
     pivot_df = select(pivot_df, output_cols...)
 
     # Save results

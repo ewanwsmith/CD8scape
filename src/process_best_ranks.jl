@@ -400,20 +400,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     removed_count = before_filter - nrow(pivot_df)
     println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
 
-    # Calculate fold change (Derived (_D) / Ancestral (_A)) for all valid rows
-    if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
-        pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
-        pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
-    else
-        println("DEBUG: Cannot calculate foldchange_HMBR or log2_foldchange_HMBR due to missing columns.")
-    end
-
-    # Frame is already present from grouping; no join needed
-
-    # Keep Description exactly as mapped; ensure no trailing underscores or numeric suffixes
-    # No further cleanup needed for Frame
-
-    # Calculate fold change and log2 after all joins/cleaning
+    # Calculate fold change (Derived / Ancestral) for all valid rows
     if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
         pivot_df.foldchange_HMBR = pivot_df.HMBR_D ./ pivot_df.HMBR_A
         pivot_df.log2_foldchange_HMBR = log2.(pivot_df.foldchange_HMBR)
@@ -445,8 +432,22 @@ if abspath(PROGRAM_FILE) == @__FILE__
         end
     end
 
+    # Add best (lowest-rank) peptide sequence per (Locus, Mutation) for ancestral and derived
+    best_pep_A = combine(
+        groupby(filter(r -> r.Peptide_Type == "A", best_ranks), [:Locus, :Mutation]),
+        [:Best_EL_Rank, :Sequence] => ((r, s) -> s[argmin(r)]) => :BestPeptide_A
+    )
+    best_pep_D = combine(
+        groupby(filter(r -> r.Peptide_Type == "D", best_ranks), [:Locus, :Mutation]),
+        [:Best_EL_Rank, :Sequence] => ((r, s) -> s[argmin(r)]) => :BestPeptide_D
+    )
+    pivot_df = leftjoin(pivot_df, best_pep_A, on = [:Locus, :Mutation])
+    pivot_df = leftjoin(pivot_df, best_pep_D, on = [:Locus, :Mutation])
+
     # Prepare final output columns (use already computed values)
-    output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :HMBR_D, :foldchange_HMBR, :log2_foldchange_HMBR]
+    output_cols = [:Frame, :Locus, :Mutation, :HMBR_A, :BestPeptide_A, :HMBR_D, :BestPeptide_D, :foldchange_HMBR, :log2_foldchange_HMBR]
+    # Only select columns that actually exist (HMBR_A/D may be absent if one type is missing)
+    output_cols = filter(c -> string(c) in names(pivot_df), output_cols)
     pivot_df = select(pivot_df, output_cols...)
 
     # Save harmonic mean results with fold change
@@ -454,14 +455,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
     CSV.write(harmonic_mean_file, pivot_df)
     println("Saved harmonic mean best ranks to $harmonic_mean_file")
 
-    # Minimal test: write Locus and log2_foldchange_HMBR to a separate CSV for debugging
-    if :log2_foldchange_HMBR in names(pivot_df)
-        minimal_test_file = resolve_write(joinpath(folder_path, "harmonic_mean_best_ranks_log2_test.csv"); suffix=suffix)
-        minimal_df = select(pivot_df, :Locus, :log2_foldchange_HMBR)
-        CSV.write(minimal_test_file, minimal_df)
-        println("Minimal test CSV written to $minimal_test_file")
-    else
-    end
     else
         println("No valid best rank data available. Skipping harmonic mean calculations.")
     end
