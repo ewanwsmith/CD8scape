@@ -70,7 +70,7 @@ skip_no_julia = unittest.skipUnless(julia_available(), "Julia not found on PATH"
 
 def make_minimal_ncbi_dir(tmp_dir: Path) -> None:
     """Copy Example_data FASTA and allele files into tmp_dir."""
-    for fname in ("sequences.fasta", "Consensus.fa", "alleles.txt", "supertype_panel.csv"):
+    for fname in ("sequences.fasta", "consensus.fa", "alleles.txt", "supertype_panel.csv"):
         src = EXAMPLE_DATA / fname
         if src.exists():
             shutil.copy(src, tmp_dir / fname)
@@ -441,6 +441,120 @@ class TestVariantFatesIntegration(unittest.TestCase):
             self.assertGreater(len(rows), 0)
             required_cols = {"Locus", "frame_filter", "peptide_filter", "binding_filter"}
             self.assertTrue(required_cols.issubset(rows[0].keys()))
+
+
+# ===========================================================================
+# Tests for reviewer fixes
+# ===========================================================================
+
+class TestConsensusFilenameCase(unittest.TestCase):
+    """Fix #2: Example_data must contain consensus.fa (lowercase), not Consensus.fa."""
+
+    def test_lowercase_consensus_fa_exists(self):
+        self.assertTrue(
+            (EXAMPLE_DATA / "consensus.fa").exists(),
+            "consensus.fa not found in Example_data — file may still be capitalised",
+        )
+
+    def test_uppercase_consensus_fa_absent(self):
+        """On a case-sensitive filesystem the old name must not exist."""
+        upper = EXAMPLE_DATA / "Consensus.fa"
+        lower = EXAMPLE_DATA / "consensus.fa"
+        # On case-insensitive (macOS HFS+) they share an inode — skip.
+        try:
+            same = upper.stat().st_ino == lower.stat().st_ino
+        except FileNotFoundError:
+            same = False
+        if same:
+            self.skipTest("Case-insensitive filesystem — inode check not meaningful")
+        self.assertFalse(upper.exists(), "Old Consensus.fa still exists alongside consensus.fa")
+
+    def test_read_ncbi_frames_finds_lowercase_consensus(self):
+        """read_ncbi_frames.jl must resolve consensus.fa, not Consensus.fa."""
+        src = REPO_ROOT / "src" / "read_ncbi_frames.jl"
+        text = src.read_text()
+        self.assertIn('"consensus.fa"', text)
+        self.assertNotIn('"Consensus.fa"', text)
+
+
+class TestNetMHCpanOutputFilenameCase(unittest.TestCase):
+    """Fix #3: run_netMHCpan.jl must write netmhcpan_output.tsv (all lowercase)."""
+
+    def test_run_netmhcpan_uses_lowercase_filename(self):
+        src = REPO_ROOT / "src" / "run_netMHCpan.jl"
+        text = src.read_text()
+        self.assertIn('"netmhcpan_output.tsv"', text,
+                      "run_netMHCpan.jl should write netmhcpan_output.tsv (lowercase)")
+        self.assertNotIn('"netMHCpan_output.tsv"', text,
+                         "run_netMHCpan.jl still references mixed-case netMHCpan_output.tsv")
+
+    def test_run_netmhcpan_global_uses_lowercase_filename(self):
+        src = REPO_ROOT / "src" / "run_netMHCpan_global.jl"
+        text = src.read_text()
+        self.assertIn('"netmhcpan_output.tsv"', text)
+        self.assertNotIn('"netMHCpan_output.tsv"', text)
+
+    def test_cd8scape_jl_expects_lowercase_filename(self):
+        src = REPO_ROOT / "CD8scape.jl"
+        text = src.read_text()
+        self.assertIn('"netmhcpan_output.tsv"', text)
+        self.assertNotIn('"netMHCpan_output.tsv"', text)
+
+
+class TestPerAlleleBestRanksSequences(unittest.TestCase):
+    """Fix #4: per_allele_best_ranks.csv must include Peptide_A and Peptide_D columns."""
+
+    def _check_source_has_sequence_columns(self, script_name: str) -> None:
+        src = REPO_ROOT / "src" / script_name
+        text = src.read_text()
+        self.assertIn(":Sequence => :Peptide_A", text,
+                      f"{script_name} missing Peptide_A in per-allele join")
+        self.assertIn(":Sequence => :Peptide_D", text,
+                      f"{script_name} missing Peptide_D in per-allele join")
+        self.assertIn(":Peptide_A", text)
+        self.assertIn(":Peptide_D", text)
+        # Both must appear in the final select! call
+        select_block = text[text.rfind("select!(per_allele_df"):]
+        self.assertIn(":Peptide_A", select_block)
+        self.assertIn(":Peptide_D", select_block)
+
+    def test_process_best_ranks_has_sequence_columns(self):
+        self._check_source_has_sequence_columns("process_best_ranks.jl")
+
+    def test_process_best_ranks_supertype_has_sequence_columns(self):
+        self._check_source_has_sequence_columns("process_best_ranks_supertype.jl")
+
+    @skip_no_julia
+    def test_per_allele_csv_has_peptide_columns_at_runtime(self):
+        """End-to-end: run process_best_ranks.jl with --per-allele and check output columns."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # Build minimal processed_peptides.csv with two mutations, A and D types
+            rows = []
+            for locus in [10, 20]:
+                for ptype, suffix in [("A", "_A"), ("D", "_D")]:
+                    for i, seq in enumerate(["ACDEFGHIK", "MNPQRSTVW"]):
+                        rows.append({
+                            "Locus": locus,
+                            "MHC": "HLA-A02:01",
+                            "Mutation": f"X{locus}Y",
+                            "EL_Rank": 0.5 + i * 0.1,
+                            "Peptide_label": f"X{locus}Y_frame1_{i}{suffix}",
+                            "Peptide": seq,
+                        })
+            make_minimal_frames_csv(d, dna="ATGCCCGAATTTAAGCCC", start=1, desc="ORF1")
+            pp = d / "processed_peptides.csv"
+            with open(pp, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["Locus", "MHC", "Mutation", "EL_Rank", "Peptide_label", "Peptide"])
+                w.writeheader(); w.writerows(rows)
+            result = run_julia("process_best_ranks.jl", str(d), "--per-allele")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            pa_file = d / "per_allele_best_ranks.csv"
+            self.assertTrue(pa_file.exists(), "per_allele_best_ranks.csv was not written")
+            pa_rows = read_csv_rows(pa_file)
+            self.assertGreater(len(pa_rows), 0)
+            self.assertIn("Peptide_A", pa_rows[0], "Peptide_A column missing from per_allele_best_ranks.csv")
+            self.assertIn("Peptide_D", pa_rows[0], "Peptide_D column missing from per_allele_best_ranks.csv")
 
 
 # ===========================================================================
