@@ -140,7 +140,7 @@ function main()
     # Inputs: ignore suffix; discover with latest
     alleles_file = resolve_read(joinpath(folder_path, "alleles.txt"); suffix="", latest=latest)
     peptides_file = resolve_read(joinpath(folder_path, "Peptides.pep"); suffix="", latest=latest)
-    xlsfile_path = resolve_write(joinpath(folder_path, "netMHCpan_output.tsv"); suffix=suffix)
+    xlsfile_path = resolve_write(joinpath(folder_path, "netmhcpan_output.tsv"); suffix=suffix)
     cache_file   = resolve_write(joinpath(folder_path, "results_cache.jls"); suffix=suffix)
 
     # Check if required files exist

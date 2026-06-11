@@ -416,15 +416,15 @@ if !isempty(best_ranks)
         best_D_pa = filter(row -> row.Peptide_Type == "D", best_ranks)
         if !isempty(best_A_pa) && !isempty(best_D_pa)
             per_allele_df = innerjoin(
-                select(best_A_pa, :Frame, :Locus, :MHC, :Mutation, :Best_EL_Rank => :ELBR_A),
-                select(best_D_pa, :Locus, :MHC, :Mutation, :Best_EL_Rank => :ELBR_D),
+                select(best_A_pa, :Frame, :Locus, :MHC, :Mutation, :Best_EL_Rank => :ELBR_A, :Sequence => :Peptide_A),
+                select(best_D_pa, :Locus, :MHC, :Mutation, :Best_EL_Rank => :ELBR_D, :Sequence => :Peptide_D),
                 on = [:Locus, :MHC, :Mutation]
             )
             filter!(row -> row.ELBR_A <= 2.0, per_allele_df)
             if !isempty(per_allele_df)
                 per_allele_df[!, :foldchange_BR] = per_allele_df.ELBR_D ./ per_allele_df.ELBR_A
                 per_allele_df[!, :log2_foldchange_BR] = log2.(per_allele_df.foldchange_BR)
-                select!(per_allele_df, :Frame, :Locus, :Mutation, :MHC, :ELBR_A, :ELBR_D, :foldchange_BR, :log2_foldchange_BR)
+                select!(per_allele_df, :Frame, :Locus, :Mutation, :MHC, :ELBR_A, :Peptide_A, :ELBR_D, :Peptide_D, :foldchange_BR, :log2_foldchange_BR)
                 per_allele_file = resolve_write(joinpath(folder_path, "per_allele_best_ranks.csv"); suffix=suffix)
                 CSV.write(per_allele_file, per_allele_df)
                 println("Saved per-allele escape log2 fold changes to $per_allele_file")
