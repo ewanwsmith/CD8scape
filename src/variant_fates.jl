@@ -106,8 +106,9 @@ function main()
     variants_path = resolve_read(joinpath(folder_path, "variants.csv"); suffix=suffix, latest=latest)
     frames_path   = resolve_read(joinpath(folder_path, "frames.csv");   suffix="",     latest=latest)
 
-    variants = CSV.read(variants_path, DataFrame)
-    frames   = CSV.read(frames_path,   DataFrame)
+    variants = CSV.read(variants_path, DataFrame; stringtype = String,
+                        types = Dict(:Consensus => String, :Variant => String))
+    frames   = CSV.read(frames_path,   DataFrame; stringtype = String)
     frames[!, :Start] = [parse(Int, split(split(r, ";")[1],   ",")[1]) for r in frames.Region]
     frames[!, :End]   = [parse(Int, split(split(r, ";")[end], ",")[2]) for r in frames.Region]
 

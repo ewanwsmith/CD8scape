@@ -113,8 +113,9 @@ function join_data(folder_path::String; suffix::AbstractString="", latest::Bool=
     candidate_variants = with_suffix(base_variants, suffix)
     variants_path = isfile(candidate_variants) ? candidate_variants : discover_path(base_variants; latest=latest)
     
-    frames = CSV.read(frames_path, DataFrame)
-    variants = CSV.read(variants_path, DataFrame)
+    frames   = CSV.read(frames_path,   DataFrame; stringtype = String)
+    variants = CSV.read(variants_path, DataFrame; stringtype = String,
+                        types = Dict(:Consensus => String, :Variant => String))
     
     frames[!, :Start] = [
         parse(Int, split(split(region, ";")[1], ",")[1]) for region in frames.Region

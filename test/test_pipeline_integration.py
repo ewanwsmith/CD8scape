@@ -297,6 +297,20 @@ class TestGeneratePeptides(unittest.TestCase):
                     self.assertIn("Peptide_label", rows[0])
 
     @skip_no_julia
+    def test_bool_ambiguous_nucleotides_do_not_crash(self):
+        """Consensus/Variant values like 'T' or 'F' must not be parsed as Bool by CSV.jl."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            make_minimal_frames_csv(d, dna="ATGCCCGAATTTAAG", start=1)
+            rows = [{"Locus": "4", "Consensus": "T", "Variant": "F"}]
+            with open(d / "variants.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["Locus", "Consensus", "Variant"])
+                w.writeheader(); w.writerows(rows)
+            result = run_julia("generate_peptides.jl", str(d))
+            self.assertNotIn("MethodError", result.stderr,
+                             "CSV.jl parsed 'T'/'F' as Bool — add types= to CSV.read call")
+
+    @skip_no_julia
     def test_no_folder_arg_exits_nonzero(self):
         result = subprocess.run(
             ["julia", f"--project={SRC_DIR}", str(SRC_DIR / "generate_peptides.jl")],
@@ -555,6 +569,60 @@ class TestPerAlleleBestRanksSequences(unittest.TestCase):
             self.assertGreater(len(pa_rows), 0)
             self.assertIn("Peptide_A", pa_rows[0], "Peptide_A column missing from per_allele_best_ranks.csv")
             self.assertIn("Peptide_D", pa_rows[0], "Peptide_D column missing from per_allele_best_ranks.csv")
+
+
+class TestHMBROutputHasPeptideSequences(unittest.TestCase):
+    """harmonic_mean_best_ranks.csv must include BestPeptide_A and BestPeptide_D columns."""
+
+    def _check_source_has_bestpeptide(self, script_name: str) -> None:
+        src = REPO_ROOT / "src" / script_name
+        text = src.read_text()
+        self.assertIn(":BestPeptide_A", text,
+                      f"{script_name} missing BestPeptide_A in output_cols")
+        self.assertIn(":BestPeptide_D", text,
+                      f"{script_name} missing BestPeptide_D in output_cols")
+
+    def test_process_best_ranks_has_bestpeptide(self):
+        self._check_source_has_bestpeptide("process_best_ranks.jl")
+
+    def test_process_best_ranks_supertype_has_bestpeptide(self):
+        self._check_source_has_bestpeptide("process_best_ranks_supertype.jl")
+
+    @skip_no_julia
+    def test_hmbr_csv_has_bestpeptide_columns_at_runtime(self):
+        """End-to-end: run process_best_ranks.jl and check harmonic_mean_best_ranks.csv columns."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            rows = []
+            for locus in [10, 20]:
+                for ptype, suffix in [("A", "_A"), ("D", "_D")]:
+                    for i, seq in enumerate(["ACDEFGHIK", "MNPQRSTVW"]):
+                        rows.append({
+                            "Locus": locus,
+                            "MHC": "HLA-A02:01",
+                            "Mutation": f"X{locus}Y",
+                            "EL_Rank": 0.5 + i * 0.1,
+                            "Peptide_label": f"X{locus}Y_frame1_{i}{suffix}",
+                            "Peptide": seq,
+                        })
+            make_minimal_frames_csv(d, dna="ATGCCCGAATTTAAGCCC", start=1, desc="ORF1")
+            pp = d / "processed_peptides.csv"
+            with open(pp, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["Locus", "MHC", "Mutation", "EL_Rank", "Peptide_label", "Peptide"])
+                w.writeheader(); w.writerows(rows)
+            result = run_julia("process_best_ranks.jl", str(d))
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            hmbr_file = d / "harmonic_mean_best_ranks.csv"
+            self.assertTrue(hmbr_file.exists(), "harmonic_mean_best_ranks.csv was not written")
+            hmbr_rows = read_csv_rows(hmbr_file)
+            self.assertGreater(len(hmbr_rows), 0)
+            self.assertIn("BestPeptide_A", hmbr_rows[0],
+                          "BestPeptide_A column missing from harmonic_mean_best_ranks.csv")
+            self.assertIn("BestPeptide_D", hmbr_rows[0],
+                          "BestPeptide_D column missing from harmonic_mean_best_ranks.csv")
+            # The best peptide should be the one with EL_Rank 0.5 (lowest)
+            self.assertEqual(hmbr_rows[0].get("BestPeptide_A"), "ACDEFGHIK")
+            self.assertEqual(hmbr_rows[0].get("BestPeptide_D"), "ACDEFGHIK")
 
 
 # ===========================================================================
