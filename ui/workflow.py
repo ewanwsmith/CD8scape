@@ -71,7 +71,7 @@ PREP_CHOICES: List[WorkflowChoice] = [
         detail=(
             "Parse nucleotide-level variants into a variants table. "
             "Needs: a variant file (.vcf / .vcf.gz or single_locus_trajectories…out) "
-            "and reading-frame files (sequences.fasta + Consensus.fa for NCBI data, "
+            "and reading-frame files (sequences.fasta + consensus.fa for NCBI data, "
             "or Reading_Frames.dat for Samfire data)."
         ),
         cli_command="read",
@@ -83,7 +83,7 @@ PREP_CHOICES: List[WorkflowChoice] = [
         detail=(
             "Read pre-called amino-acid-level variants directly from a .aa file. "
             "Needs: a .aa variant file and reading-frame files "
-            "(sequences.fasta + Consensus.fa, or Reading_Frames.dat)."
+            "(sequences.fasta + consensus.fa, or Reading_Frames.dat)."
         ),
         cli_command="read",
         cli_fixed_args=["--aa"],
@@ -94,7 +94,7 @@ PREP_CHOICES: List[WorkflowChoice] = [
         detail=(
             "Generate synthetic single-nucleotide variants for benchmarking. "
             "Needs: reading-frame files only "
-            "(sequences.fasta + Consensus.fa, or Reading_Frames.dat). "
+            "(sequences.fasta + consensus.fa, or Reading_Frames.dat). "
             "No real variant file required."
         ),
         cli_command="simulate",

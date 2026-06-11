@@ -145,7 +145,7 @@ FILE_REQUIREMENTS = {
         "    • A .vcf or .vcf.gz file\n"
         "    • A single_locus_trajectories…out file (Samfire)\n\n"
         "  Reading-frame files (one of these pairs):\n"
-        "    • sequences.fasta + Consensus.fa  (NCBI-style data)\n"
+        "    • sequences.fasta + consensus.fa  (NCBI-style data)\n"
         "    • Reading_Frames.dat              (Samfire-style data)\n\n"
         "  Allele files (one or both):\n"
         "    • alleles.txt         (one HLA allele per line, e.g. HLA-A03:01)\n"
@@ -156,7 +156,7 @@ FILE_REQUIREMENTS = {
         "  Variant file:\n"
         "    • A .aa file (pre-called amino-acid variants)\n\n"
         "  Reading-frame files (one of these pairs):\n"
-        "    • sequences.fasta + Consensus.fa  (NCBI-style data)\n"
+        "    • sequences.fasta + consensus.fa  (NCBI-style data)\n"
         "    • Reading_Frames.dat              (Samfire-style data)\n\n"
         "  Allele files (one or both):\n"
         "    • alleles.txt         (one HLA allele per line, e.g. HLA-A03:01)\n"
@@ -165,7 +165,7 @@ FILE_REQUIREMENTS = {
     "simulation": (
         "Required files for simulation:\n\n"
         "  Reading-frame files only (no variant file needed):\n"
-        "    • sequences.fasta + Consensus.fa  (NCBI-style data)\n"
+        "    • sequences.fasta + consensus.fa  (NCBI-style data)\n"
         "    • Reading_Frames.dat              (Samfire-style data)\n\n"
         "  Allele files (one or both):\n"
         "    • alleles.txt         (one HLA allele per line, e.g. HLA-A03:01)\n"
@@ -267,6 +267,32 @@ QSpinBox, QDoubleSpinBox, QComboBox {
 
 QRadioButton { font-size: 13px; color: #1d1d1f; spacing: 8px; }
 QCheckBox    { font-size: 13px; color: #1d1d1f; spacing: 8px; }
+
+QRadioButton::indicator {
+    width: 16px; height: 16px;
+    border-radius: 8px;
+    border: 1.5px solid #a8a8ae;
+    background-color: #ffffff;
+}
+QRadioButton::indicator:checked {
+    width: 16px; height: 16px;
+    border-radius: 8px;
+    border: 1.5px solid #0071e3;
+    background-color: #0071e3;
+}
+
+QCheckBox::indicator {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid #a8a8ae;
+    background-color: #ffffff;
+}
+QCheckBox::indicator:checked {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid #0071e3;
+    background-color: #0071e3;
+}
 
 /* ── separator ── */
 QFrame#sep { background-color: #d1d1d6; max-height: 1px; min-height: 1px; }
