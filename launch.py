@@ -38,21 +38,28 @@ if sys.version_info < (3, 8):
 # PyQt6: install if missing
 # ---------------------------------------------------------------------------
 
-try:
-    import PyQt6  # noqa: F401
-except ImportError:
-    print("PyQt6 not found — installing now (this only happens once)...")
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "PyQt6>=6.4"],
-    )
-    print("PyQt6 installed.\n")
+_UI_PACKAGES = [
+    ("PyQt6", "PyQt6>=6.4"),
+    ("pyqtgraph", "pyqtgraph>=0.13"),
+    ("numpy", "numpy>=1.24"),
+]
+
+for _mod, _spec in _UI_PACKAGES:
+    try:
+        __import__(_mod)
+    except ImportError:
+        print(f"{_mod} not found — installing now (this only happens once)...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", _spec, "--break-system-packages"],
+        )
+        print(f"{_mod} installed.\n")
 
 try:
     import setproctitle  # noqa: F401
 except ImportError:
     try:
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "setproctitle"],
+            [sys.executable, "-m", "pip", "install", "setproctitle", "--break-system-packages"],
         )
     except Exception:
         pass  # Not critical — the app will still run without it
@@ -103,8 +110,6 @@ if "QT_QPA_PLATFORM_PLUGIN_PATH" not in os.environ:
 # ---------------------------------------------------------------------------
 # Launch
 # ---------------------------------------------------------------------------
-
-print("Starting CD8scape…")
 
 env = os.environ.copy()
 
