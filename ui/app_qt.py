@@ -260,9 +260,43 @@ QListWidget::item:selected {
 QSpinBox, QDoubleSpinBox, QComboBox {
     border: 1px solid #d1d1d6;
     border-radius: 7px;
-    padding: 5px 8px;
+    padding: 5px 28px 5px 8px;
     background-color: #ffffff;
+    color: #1d1d1f;
     font-size: 13px;
+}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    border-left: 1px solid #d1d1d6;
+    border-bottom: 1px solid #d1d1d6;
+    border-top-right-radius: 7px;
+    background-color: #f5f5f7;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover { background-color: #e5e5ea; }
+QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed { background-color: #d1d1d6; }
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 22px;
+    border-left: 1px solid #d1d1d6;
+    border-top: 1px solid #d1d1d6;
+    border-bottom-right-radius: 7px;
+    background-color: #f5f5f7;
+}
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background-color: #e5e5ea; }
+QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed { background-color: #d1d1d6; }
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url(_ARROW_UP_);
+    width: 7px; height: 5px;
+}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url(_ARROW_DOWN_);
+    width: 7px; height: 5px;
 }
 
 QRadioButton { font-size: 13px; color: #1d1d1f; spacing: 8px; }
@@ -345,6 +379,9 @@ QPushButton#btn_link {
     text-decoration: underline;
 }
 QPushButton#btn_link:hover { color: #0055b3; }
+
+/* ── labels (base) ── */
+QLabel { color: #1d1d1f; font-size: 13px; }
 
 /* ── status labels ── */
 QLabel#lbl_ok   { color: #34c759; font-size: 12px; }
@@ -2742,7 +2779,13 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("CD8scape")
     app.setOrganizationName("CD8scape")
-    app.setStyleSheet(STYLE)
+    _assets = Path(__file__).resolve().parent / "assets"
+    _style = STYLE.replace(
+        "_ARROW_UP_",   (_assets / "arrow_up.svg").as_posix(),
+    ).replace(
+        "_ARROW_DOWN_", (_assets / "arrow_down.svg").as_posix(),
+    )
+    app.setStyleSheet(_style)
 
     # Use Fusion style for consistent cross-platform look
     app.setStyle("Fusion")
