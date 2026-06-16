@@ -944,10 +944,13 @@ class SetupPage(QWidget):
         nmhc_layout.setSpacing(8)
 
         note = QLabel(
-            "netMHCpan must be installed separately (download from "
-            "services.healthtech.dtu.dk). Paste the full path to its executable below."
+            'netMHCpan must be installed separately (download from '
+            '<a href="https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/">'
+            'services.healthtech.dtu.dk</a>). '
+            'Paste the full path to its executable below.'
         )
         note.setWordWrap(True)
+        note.setOpenExternalLinks(True)
         note.setObjectName("lbl_info")
         nmhc_layout.addWidget(note)
 
