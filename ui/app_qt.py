@@ -123,9 +123,25 @@ from runner import (
     REPO_ROOT,
     stream_cd8scape,
 )
-from setup import check_env, read_netmhcpan_path, validate_netmhcpan, write_netmhcpan_path
+from setup import (
+    check_env, read_netmhcpan_path, read_skip_plots,
+    validate_netmhcpan, write_netmhcpan_path, write_skip_plots,
+)
 from workflow import PREP_CHOICES, RUN_CHOICES, WorkflowChoice, choice_by_key
-from plots_widget import PlotViewer, COLUMN_TOOLTIPS
+
+try:
+    if read_skip_plots():
+        raise ImportError("plots skipped by user preference")
+    from plots_widget import PlotViewer, COLUMN_TOOLTIPS
+    _PLOTS_AVAILABLE = True
+except ImportError:
+    PlotViewer = None
+    COLUMN_TOOLTIPS = {}
+    _PLOTS_AVAILABLE = False
+
+
+def plots_available() -> bool:
+    return _PLOTS_AVAILABLE
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1038,7 +1054,9 @@ class SetupPage(QWidget):
         pg_layout = QVBoxLayout(pg_box)
         pg_note = QLabel(
             "CD8scape uses pyqtgraph for interactive result plots. "
-            "If it is not already installed, click 'Install' to add it via pip."
+            "If it is not already installed, click 'Install' to add it via pip. "
+            "Plots are optional — tick the box below to skip installation and "
+            "hide the Plots tab entirely."
         )
         pg_note.setWordWrap(True)
         pg_note.setObjectName("lbl_info")
@@ -1057,6 +1075,13 @@ class SetupPage(QWidget):
         pg_row.addWidget(self._pg_status)
         pg_row.addStretch()
         pg_layout.addLayout(pg_row)
+
+        self._pg_skip_chk = QCheckBox(
+            "Skip plots — don't install pyqtgraph, hide the Plots tab"
+        )
+        self._pg_skip_chk.setChecked(read_skip_plots())
+        self._pg_skip_chk.toggled.connect(self._on_pg_skip_toggled)
+        pg_layout.addWidget(self._pg_skip_chk)
 
         vbox.addWidget(pg_box)
 
@@ -1123,16 +1148,45 @@ class SetupPage(QWidget):
 
     def _refresh_pg_status(self) -> None:
         """Check whether pyqtgraph is importable and update the status label."""
-        try:
-            import importlib
-            importlib.import_module("pyqtgraph")
-            self._pg_status.setText("✓ pyqtgraph installed")
-            self._pg_status.setObjectName("lbl_ok")
-            self._pg_install_btn.setEnabled(False)
-        except ImportError:
-            self._pg_status.setText("✗ Not installed — plots will be unavailable until installed")
-            self._pg_status.setObjectName("lbl_err")
-            self._pg_install_btn.setEnabled(True)
+        skip = self._pg_skip_chk.isChecked()
+        self._pg_install_btn.setEnabled(not skip)
+        if skip:
+            self._pg_status.setText("Plots disabled")
+            self._pg_status.setObjectName("lbl_info")
+        else:
+            try:
+                import importlib
+                importlib.import_module("pyqtgraph")
+                self._pg_status.setText("✓ pyqtgraph installed")
+                self._pg_status.setObjectName("lbl_ok")
+                self._pg_install_btn.setEnabled(False)
+            except ImportError:
+                self._pg_status.setText("✗ Not installed — plots will be unavailable until installed")
+                self._pg_status.setObjectName("lbl_err")
+                self._pg_install_btn.setEnabled(True)
+        self._pg_status.style().unpolish(self._pg_status)
+        self._pg_status.style().polish(self._pg_status)
+
+    def _on_pg_skip_toggled(self, skip: bool) -> None:
+        """Persist skip preference and apply the change live where possible."""
+        write_skip_plots(skip)
+        self._pg_install_btn.setEnabled(not skip)
+        pg_loaded = plots_available()
+        if skip:
+            if pg_loaded:
+                self._app.output_page.hide_plots_tab()
+                self._pg_status.setText("Plots tab hidden")
+            else:
+                self._pg_status.setText("Plots disabled")
+            self._pg_status.setObjectName("lbl_info")
+        else:
+            if pg_loaded:
+                self._app.output_page.show_plots_tab()
+                self._pg_status.setText("✓ pyqtgraph installed")
+                self._pg_status.setObjectName("lbl_ok")
+            else:
+                self._pg_status.setText("Restart CD8scape to enable plots")
+                self._pg_status.setObjectName("lbl_info")
         self._pg_status.style().unpolish(self._pg_status)
         self._pg_status.style().polish(self._pg_status)
 
@@ -2258,15 +2312,19 @@ class OutputPage(QWidget):
 
         self._body_tabs.addTab(files_widget, "Files")
 
-        # ── Tab 1 — Plots ─────────────────────────────────────────────────
-        plots_outer = QWidget()
-        plots_outer.setObjectName("page_root")
-        plots_vbox = QVBoxLayout(plots_outer)
-        plots_vbox.setContentsMargins(16, 12, 16, 12)
-        plots_vbox.setSpacing(0)
-        self._plot_viewer = PlotViewer(plots_outer)
-        plots_vbox.addWidget(self._plot_viewer)
-        self._body_tabs.addTab(plots_outer, "Plots")
+        # ── Tab 1 — Plots (only when pyqtgraph is available and not skipped) ──
+        self._plot_viewer = None
+        self._plots_outer: Optional[QWidget] = None
+        if plots_available():
+            plots_outer = QWidget()
+            plots_outer.setObjectName("page_root")
+            plots_vbox = QVBoxLayout(plots_outer)
+            plots_vbox.setContentsMargins(16, 12, 16, 12)
+            plots_vbox.setSpacing(0)
+            self._plot_viewer = PlotViewer(plots_outer)
+            plots_vbox.addWidget(self._plot_viewer)
+            self._plots_outer = plots_outer
+            self._body_tabs.addTab(plots_outer, "Plots")
 
         vbox.addWidget(self._body_tabs, 1)
 
@@ -2309,17 +2367,37 @@ class OutputPage(QWidget):
         self._populate_file_list()
         self._parse_and_show_fates()
 
-        # Render plots in the Plots tab
-        self._plot_viewer.load(
-            folder=folder,
-            folder_name=folder.name if folder else "",
-            run_suffix=snap_run_suffix,
-            sim_suffix=(snap_sim_suffix if snap_include_pct else ""),
-            has_per_allele=snap_per_allele,
-            has_percentile=snap_include_pct,
-        )
+        # Render plots in the Plots tab (only if pyqtgraph is available)
+        if self._plot_viewer is not None:
+            self._plot_viewer.load(
+                folder=folder,
+                folder_name=folder.name if folder else "",
+                run_suffix=snap_run_suffix,
+                sim_suffix=(snap_sim_suffix if snap_include_pct else ""),
+                has_per_allele=snap_per_allele,
+                has_percentile=snap_include_pct,
+            )
         # Switch to the Plots tab automatically so the user sees the results
-        self._body_tabs.setCurrentIndex(1)
+        if self._plots_outer is not None:
+            idx = self._body_tabs.indexOf(self._plots_outer)
+            if idx != -1:
+                self._body_tabs.setCurrentIndex(idx)
+
+    # ── Plots tab visibility ──────────────────────────────────────────────
+
+    def show_plots_tab(self) -> None:
+        """Add the Plots tab if it is not already present."""
+        if self._plots_outer is None or self._body_tabs.indexOf(self._plots_outer) != -1:
+            return
+        self._body_tabs.addTab(self._plots_outer, "Plots")
+
+    def hide_plots_tab(self) -> None:
+        """Remove the Plots tab if it is currently shown."""
+        if self._plots_outer is None:
+            return
+        idx = self._body_tabs.indexOf(self._plots_outer)
+        if idx != -1:
+            self._body_tabs.removeTab(idx)
 
     # ── File list population ──────────────────────────────────────────────
 
