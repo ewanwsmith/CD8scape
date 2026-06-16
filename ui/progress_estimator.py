@@ -157,9 +157,11 @@ _ROWS_STREAMING_CAP: float = 0.70  # streaming can't push past here alone
 # ---------------------------------------------------------------------------
 
 _RUN_STEPS_2: FrozenSet[int] = frozenset({1})
+_RUN_STEPS_3: FrozenSet[int] = frozenset({1})   # read, run_obs, percentile (external bg)
 _RUN_STEPS_5: FrozenSet[int] = frozenset({1, 3})
 
 _BASE_2 = [0.01, 0.99]
+_BASE_3 = [0.01, 0.97, 0.02]   # read, run_obs, percentile
 
 _BASE_5_RUN_OBS = 0.48
 _BASE_5_READ    = 0.01
@@ -236,31 +238,50 @@ class ProgressEstimator:
     Parameters
     ----------
     include_percentile : bool
-        False → 2 steps [read, run]; True → 5 steps [read, run_obs, sim, run_sim, pct].
+        False → 2 steps [read, run];
+        True  → 5 steps [read, run_obs, sim, run_sim, pct]
+                or 3 steps [read, run_obs, pct] when external_background=True.
+    external_background : bool
+        When True (and include_percentile is True), use 3-step mode —
+        simulate and run-sim steps are skipped because the user supplied
+        their own background file via --s.
     n_threads : int
         The --t value passed to the run command.
     sim_size_factor : float
         Relative simulation size (1.0 = --n 1000 baseline).
-        Ignored when include_percentile is False.
+        Ignored when include_percentile is False or external_background is True.
     """
 
     def __init__(
         self,
         include_percentile: bool = False,
+        external_background: bool = False,
         n_threads: int = 1,
         sim_size_factor: float = 1.0,
     ) -> None:
         self._include_pct = include_percentile
+        self._ext_bg = external_background and include_percentile
         self._n_threads = max(1, int(n_threads))
         self._sim_size_factor = max(0.01, float(sim_size_factor))
-        self._n_steps = 5 if include_percentile else 2
-        self._run_indices = _RUN_STEPS_5 if include_percentile else _RUN_STEPS_2
+
+        if not include_percentile:
+            self._n_steps = 2
+            self._run_indices = _RUN_STEPS_2
+        elif self._ext_bg:
+            self._n_steps = 3
+            self._run_indices = _RUN_STEPS_3
+        else:
+            self._n_steps = 5
+            self._run_indices = _RUN_STEPS_5
+
         self._nmhc_cap = _nmhc_cap(self._n_threads)
 
-        if include_percentile:
-            base = _make_5step_base(self._sim_size_factor)
-        else:
+        if not include_percentile:
             base = list(_BASE_2)
+        elif self._ext_bg:
+            base = list(_BASE_3)
+        else:
+            base = _make_5step_base(self._sim_size_factor)
 
         env_w = _parse_env_weights(self._n_steps)
         if env_w is not None:
@@ -417,7 +438,7 @@ def _parse_post_progress(line: str, current: float) -> Optional[float]:
 def infer_threads_from_args(run_args: List[str], cpu_count: Optional[int] = None) -> int:
     """Extract the effective thread count from a CD8scape argv tail."""
     n_cpu = cpu_count or os.cpu_count() or 1
-    cap = max(1, int(os.environ.get("CD8SCAPE_MAX_THREADS", "8")))
+    cap = max(1, min(int(os.environ.get("CD8SCAPE_MAX_THREADS", "8")), 256))
 
     for i, arg in enumerate(run_args):
         if arg in ("--t", "--thread") and i + 1 < len(run_args):

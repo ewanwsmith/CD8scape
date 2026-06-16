@@ -287,6 +287,7 @@ def _mutations_by_frame(
 def _gaussian_kde(data: np.ndarray, x: np.ndarray) -> np.ndarray:
     """Silverman-bandwidth Gaussian KDE."""
     bw = 1.06 * float(np.std(data)) * len(data) ** (-0.2)
+    bw = max(bw, 1e-6)  # guard: all-identical data → std=0 → division by zero
     diff = x[:, None] - data[None, :]
     kernel = np.exp(-0.5 * (diff / bw) ** 2)
     return kernel.mean(axis=1) / (bw * math.sqrt(2 * math.pi))
@@ -1024,6 +1025,20 @@ class PlotViewer(QWidget):
                 "Escape Scores",
             )
             return
+
+        _REQUIRED_COLS = {"Locus", "Mutation", "log2_foldchange_HMBR"}
+        if obs_rows:
+            missing = _REQUIRED_COLS - obs_rows[0].keys()
+            if missing:
+                self._tabs.addTab(
+                    _make_error_panel(
+                        f"{hmbr_path.name} is missing required columns: "
+                        f"{', '.join(sorted(missing))}\n\n"
+                        "Expected columns: " + ", ".join(sorted(_REQUIRED_COLS))
+                    ),
+                    "Escape Scores",
+                )
+                return
 
         frame_order, frame_colors, mutation_colors = \
             _frame_order_and_colors(obs_rows)

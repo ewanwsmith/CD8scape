@@ -86,6 +86,7 @@ def write_netmhcpan_path(new_path: str) -> None:
     new_line = f"NETMHCPAN={new_path}"
 
     if not SETTINGS_PATH.exists():
+        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         SETTINGS_PATH.write_text(new_line + "\n", encoding="utf-8")
         return
 
@@ -162,6 +163,54 @@ def validate_netmhcpan(raw_path: str) -> PathCheck:
         )
 
     return PathCheck(ok=True, message=f"Executable found: {p}", resolved=p)
+
+
+# ---------------------------------------------------------------------------
+# Skip-plots preference
+# ---------------------------------------------------------------------------
+
+_SKIP_PLOTS_KEY = "SKIP_PLOTS"
+
+
+def read_skip_plots() -> bool:
+    """Return True if the user has opted out of pyqtgraph / the Plots tab."""
+    if not SETTINGS_PATH.exists():
+        return False
+    for raw in SETTINGS_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            if key.strip().upper() == _SKIP_PLOTS_KEY:
+                return value.strip().lower() in ("1", "true", "yes")
+    return False
+
+
+def write_skip_plots(skip: bool) -> None:
+    """Persist the skip-plots preference to settings.txt."""
+    new_line = f"{_SKIP_PLOTS_KEY}={'true' if skip else 'false'}"
+
+    if not SETTINGS_PATH.exists():
+        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_PATH.write_text(new_line + "\n", encoding="utf-8")
+        return
+
+    lines = SETTINGS_PATH.read_text(encoding="utf-8").splitlines()
+    result = []
+    replaced = False
+    for raw in lines:
+        stripped = raw.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key, _, _ = stripped.partition("=")
+            if key.strip().upper() == _SKIP_PLOTS_KEY:
+                result.append(new_line)
+                replaced = True
+                continue
+        result.append(raw)
+    if not replaced:
+        result.append(new_line)
+    SETTINGS_PATH.write_text("\n".join(result) + "\n", encoding="utf-8")
 
 
 @dataclass
