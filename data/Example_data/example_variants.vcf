@@ -1,0 +1,49 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##contig=<ID=ExampleGenome,length=159>
+##INFO=<ID=CD8SCAPE_TEST,Number=1,Type=String,Description="Expected CD8scape filter outcome for this variant">
+##
+## Synthetic VCF designed to exercise all three CD8scape filtering stages
+## against the 159-nt single-ORF example genome (Minimal protein, pos 1-159).
+##
+## Stage 1 — Frame filter
+##   OUT OF FRAME : variant position outside any annotated ORF
+##   IN FRAME     : position falls within the ORF (1-159)
+##
+## Stage 2 — Peptide filter (in-frame variants only)
+##   SYNONYMOUS   : nucleotide change does not alter the amino acid
+##   STOP CODON   : change introduces a premature stop
+##   NON-SYN      : amino acid changes -> proceeds to binding filter
+##
+## Stage 3 — Binding filter (non-synonymous variants only)
+##   Result depends on netMHCpan scores for the alleles in alleles.txt.
+##   18 non-synonymous variants are included across the full 53-AA protein
+##   to ensure multiple binding hits.
+##
+## Nucleotide positions reference the consensus sequence in consensus.fa.
+## Amino-acid positions are 1-based within the Minimal protein ORF.
+##
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+ExampleGenome	4	.	A	G	50	PASS	CD8SCAPE_TEST=NonSynonymous_K2E_codon1-3_AAG>GAG
+ExampleGenome	9	.	C	T	50	PASS	CD8SCAPE_TEST=Synonymous_I3I_codon7-9_ATC>ATT
+ExampleGenome	12	.	G	A	50	PASS	CD8SCAPE_TEST=Synonymous_L4L_codon10-12_CTG>CTA
+ExampleGenome	21	.	C	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_F7L_codon19-21_TTC>TTA
+ExampleGenome	22	.	G	T	50	PASS	CD8SCAPE_TEST=StopCodon_E8stop_codon22-24_GAG>TAG
+ExampleGenome	31	.	A	G	50	PASS	CD8SCAPE_TEST=NonSynonymous_K11E_codon31-33_AAG>GAG
+ExampleGenome	37	.	C	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_Q13K_codon37-39_CAG>AAG
+ExampleGenome	47	.	T	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_L16Q_codon46-48_CTG>CAG
+ExampleGenome	55	.	G	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_D19N_codon55-57_GAC>AAC
+ExampleGenome	59	.	A	G	50	PASS	CD8SCAPE_TEST=NonSynonymous_K20R_codon58-60_AAG>AGG
+ExampleGenome	64	.	T	C	50	PASS	CD8SCAPE_TEST=NonSynonymous_Y22H_codon64-66_TAC>CAC
+ExampleGenome	72	.	G	T	50	PASS	CD8SCAPE_TEST=NonSynonymous_Q24H_codon70-72_CAG>CAT
+ExampleGenome	81	.	G	C	50	PASS	CD8SCAPE_TEST=NonSynonymous_K27N_codon79-81_AAG>AAC
+ExampleGenome	92	.	A	C	50	PASS	CD8SCAPE_TEST=NonSynonymous_Q31P_codon91-93_CAG>CCG
+ExampleGenome	98	.	T	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_F33Y_codon97-99_TTC>TAC
+ExampleGenome	103	.	G	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_V35M_codon103-105_GTG>ATG
+ExampleGenome	116	.	A	G	50	PASS	CD8SCAPE_TEST=NonSynonymous_Q39R_codon115-117_CAG>CGG
+ExampleGenome	124	.	G	A	50	PASS	CD8SCAPE_TEST=NonSynonymous_E42K_codon124-126_GAG>AAG
+ExampleGenome	133	.	A	C	50	PASS	CD8SCAPE_TEST=NonSynonymous_K45Q_codon133-135_AAG>CAG
+ExampleGenome	144	.	C	G	50	PASS	CD8SCAPE_TEST=NonSynonymous_F48L_codon142-144_TTC>TTG
+ExampleGenome	151	.	A	G	50	PASS	CD8SCAPE_TEST=NonSynonymous_K51E_codon151-153_AAG>GAG
+ExampleGenome	160	.	A	G	50	PASS	CD8SCAPE_TEST=OutOfFrame_pos160_beyond_ORF_end
+ExampleGenome	170	.	T	C	50	PASS	CD8SCAPE_TEST=OutOfFrame_pos170_beyond_ORF_end
