@@ -95,3 +95,4 @@ data/**/results_cache.jls
 # macOS / Windows temp files
 *.dmg
 *.tmp
+test_run.log
