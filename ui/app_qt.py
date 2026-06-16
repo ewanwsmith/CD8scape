@@ -1621,6 +1621,51 @@ class RunPage(QWidget):
         pct_sv.setContentsMargins(0, 4, 0, 0)
         pct_sv.setSpacing(12)
 
+        self._pct_ext_enable = QCheckBox(
+            "Use pre-existing background files  —  skip simulate/run steps "
+            "and point directly to existing background CSV files"
+        )
+        pct_sv.addWidget(self._pct_ext_enable)
+
+        self._pct_ext_widget = QWidget()
+        ext_vbox = QVBoxLayout(self._pct_ext_widget)
+        ext_vbox.setContentsMargins(0, 4, 0, 0)
+        ext_vbox.setSpacing(6)
+
+        ext_vbox.addWidget(QLabel("Background file (--s):"))
+        sim_row = QHBoxLayout()
+        self._pct_ext_sim = QLineEdit()
+        self._pct_ext_sim.setPlaceholderText(
+            "Path to background CSV  (harmonic_mean_best_ranks_simulated.csv)"
+        )
+        sim_browse = _btn("Browse…", "btn_secondary")
+        sim_browse.setFixedWidth(90)
+        sim_browse.clicked.connect(
+            lambda: self._browse_pct_file(self._pct_ext_sim, "Background CSV (--s)")
+        )
+        sim_row.addWidget(self._pct_ext_sim, 1)
+        sim_row.addWidget(sim_browse)
+        ext_vbox.addLayout(sim_row)
+
+        ext_vbox.addWidget(QLabel("Observed file (--o, optional):"))
+        obs_row = QHBoxLayout()
+        self._pct_ext_obs = QLineEdit()
+        self._pct_ext_obs.setPlaceholderText(
+            "Auto-detected from folder if blank  (harmonic_mean_best_ranks*.csv)"
+        )
+        obs_browse = _btn("Browse…", "btn_secondary")
+        obs_browse.setFixedWidth(90)
+        obs_browse.clicked.connect(
+            lambda: self._browse_pct_file(self._pct_ext_obs, "Observed CSV (--o)")
+        )
+        obs_row.addWidget(self._pct_ext_obs, 1)
+        obs_row.addWidget(obs_browse)
+        ext_vbox.addLayout(obs_row)
+
+        pct_sv.addWidget(self._pct_ext_widget)
+        self._pct_ext_widget.hide()
+        self._pct_ext_enable.toggled.connect(self._on_ext_bg_toggled)
+
         sim_box = QGroupBox("Simulation settings")
         sim_inner = QVBoxLayout(sim_box)
         self._pct_sim_opts = SimulateOptionsWidget(self)
@@ -1718,8 +1763,33 @@ class RunPage(QWidget):
         except (ValueError, IndexError):
             return "simulated"
 
+    def _on_ext_bg_toggled(self, checked: bool) -> None:
+        self._pct_ext_widget.setVisible(checked)
+        self._pct_sim_opts.parentWidget().setVisible(not checked)
+
+    def _browse_pct_file(self, line_edit: "QLineEdit", title: str) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, title, "", "CSV files (*.csv);;All files (*)"
+        )
+        if path:
+            line_edit.setText(path)
+
+    @property
+    def use_external_background(self) -> bool:
+        return self._pct_enable.isChecked() and self._pct_ext_enable.isChecked()
+
     def percentile_option_args(self) -> List[str]:
-        return ["--per-allele"] if self._pct_per_allele.isChecked() else []
+        args: List[str] = []
+        if self._pct_per_allele.isChecked():
+            args.append("--per-allele")
+        if self.use_external_background:
+            sim_path = self._pct_ext_sim.text().strip()
+            if sim_path:
+                args += ["--s", sim_path]
+            obs_path = self._pct_ext_obs.text().strip()
+            if obs_path:
+                args += ["--o", obs_path]
+        return args
 
 
 # ---------------------------------------------------------------------------
@@ -1924,8 +1994,10 @@ class ExecutePage(QWidget):
         sim_factor = (
             self._app.run_page.sim_relative_size() if include_pct else 1.0
         )
+        use_ext = run_page.use_external_background if include_pct else False
         self._estimator = ProgressEstimator(
             include_percentile=include_pct,
+            external_background=use_ext,
             n_threads=n_threads,
             sim_size_factor=sim_factor,
         )
@@ -1940,7 +2012,12 @@ class ExecutePage(QWidget):
 
         # Reset all cards and overall bar
         self._steps_done = 0
-        self._n_active_steps = 5 if include_pct else 2
+        if include_pct and use_ext:
+            self._n_active_steps = 3
+        elif include_pct:
+            self._n_active_steps = 5
+        else:
+            self._n_active_steps = 2
         for i in range(len(self._step_rows)):
             self._set_card_state(i, "○", "#a8a8ae", "Waiting", "lbl_info")
         self._update_overall_bar()
@@ -1974,25 +2051,29 @@ class ExecutePage(QWidget):
         steps = [prep_args, run_args]
 
         if self._app.run_page.include_percentile:
-            run_page   = self._app.run_page
-            sim_sfx    = run_page.sim_suffix()       # e.g. "simulated"
-            sim_opts   = run_page.sim_option_args()  # n/p/seed/suffix/latest
-            pct_opts   = run_page.percentile_option_args()
-
-            # Step 3 — simulate
-            sim_args = ["simulate", folder] + sim_opts
-
-            # Step 4 — run simulated: same command as step 2, suffix overridden
-            run_sim_args = (
-                [run_choice.cli_command, folder]
-                + run_choice.cli_fixed_args
-                + _inject_suffix(self._app.run_option_args, sim_sfx)
-            )
-
-            # Step 5 — percentile
+            run_page = self._app.run_page
+            pct_opts = run_page.percentile_option_args()
             pct_args = ["percentile", folder] + pct_opts
 
-            steps += [sim_args, run_sim_args, pct_args]
+            if run_page.use_external_background:
+                # External background: skip simulate + run-sim (3 steps total)
+                steps += [pct_args]
+            else:
+                sim_sfx  = run_page.sim_suffix()
+                sim_opts = run_page.sim_option_args()
+
+                # Step 3 — simulate
+                sim_args = ["simulate", folder] + sim_opts
+
+                # Step 4 — run simulated
+                run_sim_args = (
+                    [run_choice.cli_command, folder]
+                    + run_choice.cli_fixed_args
+                    + _inject_suffix(self._app.run_option_args, sim_sfx)
+                )
+
+                # Step 5 — percentile
+                steps += [sim_args, run_sim_args, pct_args]
 
         return steps
 
