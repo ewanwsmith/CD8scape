@@ -1148,7 +1148,7 @@ class SetupPage(QWidget):
         self._pg_status.style().polish(self._pg_status)
 
         class _PipThread(QThread):
-            done = pyqtSignal(bool)
+            done = pyqtSignal(bool, str)  # (success, error_detail)
 
             def run(self):
                 try:
@@ -1158,15 +1158,15 @@ class SetupPage(QWidget):
                         capture_output=True,
                         timeout=120,
                     )
-                    self.done.emit(result.returncode == 0)
-                except Exception:
-                    self.done.emit(False)
+                    self.done.emit(result.returncode == 0, "")
+                except Exception as exc:
+                    self.done.emit(False, str(exc))
 
         self._pg_thread = _PipThread(self)
         self._pg_thread.done.connect(self._pg_install_done)
         self._pg_thread.start()
 
-    def _pg_install_done(self, ok: bool) -> None:
+    def _pg_install_done(self, ok: bool, error_detail: str = "") -> None:
         self._pg_install_btn.setText("Install plotting library")
         if ok:
             self._pg_status.setText("✓ pyqtgraph installed")
@@ -1174,6 +1174,8 @@ class SetupPage(QWidget):
             self._pg_install_btn.setEnabled(False)
             # Re-render any existing plots immediately — no restart needed
             op = self._app.output_page
+            if op._plot_viewer is None:
+                return
             op._plot_viewer.load(
                 folder=op._folder,
                 folder_name=op._folder.name if op._folder else "",
@@ -1183,7 +1185,8 @@ class SetupPage(QWidget):
                 has_percentile=op._snap_include_pct,
             )
         else:
-            self._pg_status.setText("✗ Installation failed — try: pip install pyqtgraph")
+            detail = f" ({error_detail})" if error_detail else ""
+            self._pg_status.setText(f"✗ Installation failed{detail} — try: pip install pyqtgraph")
             self._pg_status.setObjectName("lbl_err")
             self._pg_install_btn.setEnabled(True)
         self._pg_status.style().unpolish(self._pg_status)
