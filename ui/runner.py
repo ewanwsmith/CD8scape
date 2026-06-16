@@ -140,7 +140,10 @@ def stream_cd8scape(cd8scape_args: List[str]) -> Iterator[str]:
     )
 
     # Stream lines as they arrive. readline() returns '' only at EOF.
-    assert proc.stdout is not None
+    if proc.stdout is None:
+        raise RuntimeError(
+            "subprocess stdout is None — was Popen called without stdout=PIPE?"
+        )
     try:
         for line in proc.stdout:
             # Preserve line content; strip only the trailing newline so the UI
@@ -167,7 +170,10 @@ def run_cd8scape(cd8scape_args: List[str]) -> RunResult:
             returncode = int(item.split(":", 1)[1])
         else:
             lines.append(item)
-    assert returncode is not None
+    if returncode is None:
+        raise RuntimeError(
+            "stream_cd8scape() ended without emitting an __CD8SCAPE_EXIT__ sentinel"
+        )
     print("\n".join(lines))
     return RunResult(
         command=build_command(cd8scape_args),
