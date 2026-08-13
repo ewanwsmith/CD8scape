@@ -212,9 +212,9 @@ Percentile benchmarking (step 6) compares your observed variants against a backg
 - `--s <background_file>`: the background comparator file. Defaults to `harmonic_mean_best_ranks_simulated.csv` (or `per_allele_best_ranks_simulated.csv` with `--per-allele`) — pass a real-world file explicitly to use one.
 - `--o <obs_file>`: the observed file (defaults to the most recent match in the data folder, excluding `_simulated`).
 - Observed variants are dropped from the background before percentiles are computed.
-- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv`. Added columns: `Percentile` (0–100), `Z_i` (per-variant normal quantile of the percentile), and `p_value` (empty for individual variants). Two summary rows are appended:
-  - `combined_z`: Stouffer's combined Z (parametric), mean percentile across all k variants, one-tailed p-value.
-  - `empirical_p`: empirical p-value from 99999 random draws of k variants (without replacement) from the background, comparing their mean percentile to the observed mean. A non-parametric check on Stouffer's Z.
+- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv`. Added columns: `Percentile` (0–100), `Z_i` (the percentile re-expressed as a standard-normal score), and `p_value` (empty for individual variants). Two summary rows are appended:
+  - `combined_z`: a parametric combined score (Stouffer's method) testing whether the observed variants sit higher in the background distribution than expected, with a one-tailed p-value.
+  - `empirical_p`: a non-parametric permutation p-value that repeatedly draws random sets of variants from the background and compares their mean percentile to the observed mean.
 
 The desktop app exposes the real-world path as a **"Use pre-existing background files"** toggle on the Run page. Turning it on skips the simulate step and the extra run-on-simulated pass, and calls `percentile` straight against the background and observed CSVs you point it at — 3 steps instead of 5.
 
@@ -234,87 +234,19 @@ Together these let several analyses (e.g. observed vs. simulated) sit in one dat
 4. **simulate** *(optional, right before percentile)*: generate a synthetic background of single-nucleotide variants, then run step 3 on it (with a `--suffix`). Only needed if you don't already have a real-world background — skip to step 5 if you do.
 5. **percentile**: compare observed fold changes to a background — real-world by default (`--s <background_file>`, built by running steps 2–3 on a real variant panel), or the simulated one from step 4. Add `--per-allele` to benchmark per-allele fold changes instead of HMBR.
 
-## Methods
+## How it works
 
-The maths behind each stage. Equations render on GitHub (via MathJax); some plain-text Markdown viewers show the raw LaTeX instead.
+netMHCpan reports an eluted-ligand percentile rank (EL %rank) for each peptide–allele pair — how the peptide's binding score compares against a background of random natural peptides for that allele. Lower ranks mean stronger predicted presentation to CD8+ T cells. CD8scape counts a peptide as a binder at an EL %rank of 2% or better (netMHCpan's weak-binder cut-off).
 
-netMHCpan reports an eluted-ligand percentile rank (EL %rank) for each peptide–allele pair: the rank of the peptide's raw score against a background of random natural peptides for that allele. Lower ranks mean stronger predicted antigen presentation. The usual cut-offs are ≤ 0.5% for strong binders and ≤ 2% for weak binders; CD8scape uses ≤ 2% as its binding filter.
+**Peptide generation.** For each non-synonymous variant, CD8scape enumerates every 8–11-mer peptide whose window covers the mutated residue, in both the ancestral (consensus) and derived (variant) states. Peptides that are synonymous between the two states, or that contain a stop codon, are dropped.
 
-### 1. Peptide generation
+**Best rank.** netMHCpan scores every peptide against each allele. For a given variant, state, and allele, CD8scape keeps the strongest binder — the lowest EL %rank among the peptides covering the mutation. These are the per-allele best ranks `ELBR_A` (ancestral) and `ELBR_D` (derived).
 
-Take a non-synonymous variant at amino-acid position *a* in an ORF's translated protein of length *L*. CD8scape enumerates every peptide of length 8–11 whose window covers the mutated residue. A peptide starting at position *i* with length *ℓ* spans positions *i* to *i + ℓ − 1*, and is kept when
+**Harmonic mean best rank (HMBR).** Best ranks are pooled across the allele panel using a harmonic mean, which is dominated by the strongest binders — appropriate because recognition hinges on the single best-presented peptide. An individual genotype weights its alleles equally; the supertype panel weights them by population frequency.
 
-$$i \le a \le i + \ell - 1, \qquad 1 \le i \le L - \ell + 1.$$
+**Fold change.** The escape signal for each variant is the ratio of derived to ancestral HMBR, reported on a log2 scale. A positive log2 fold change means the derived peptide binds more weakly than the ancestral one — predicted escape. Loci where neither state binds (both HMBR above 2) are removed first. With `--per-allele`, the same ratio is computed separately for each allele, restricted to alleles where the ancestral peptide is at least a weak binder.
 
-That's up to 8 + 9 + 10 + 11 = 38 peptides per state (fewer near the termini), for both the ancestral state A (consensus residue) and the derived state D (variant residue). Peptides that are synonymous (A and D identical) or contain a stop codon (`*`) are dropped.
-
-### 2. Best rank per allele
-
-netMHCpan scores every peptide against each HLA allele. For a variant locus, state s (A or D), and allele h, the best rank is the minimum EL %rank over the set of peptides spanning the mutated residue:
-
-$$r_{s,h} = \min_{p} \; \mathrm{EL\%rank}(p, h).$$
-
-These are `ELBR_A` and `ELBR_D` in the per-allele output.
-
-### 3. Harmonic mean best rank (HMBR)
-
-Best ranks are pooled across the allele panel with a harmonic mean. The harmonic mean is pulled toward the smallest ranks — the strongest binders — which is what you want, since recognition is driven by the single best-presented peptide.
-
-Individual genotype, over n alleles (unweighted):
-
-$$\mathrm{HMBR}_s = \frac{n}{\displaystyle\sum_{h=1}^{n} \frac{1}{r_{s,h}}}.$$
-
-Supertype panel, weighted by each allele's population frequency w:
-
-$$\mathrm{HMBR}_s = \frac{\displaystyle\sum_{h} w_h}{\displaystyle\sum_{h} \frac{w_h}{r_{s,h}}}.$$
-
-Only positive ranks count. The unweighted form is just the weighted one with every w = 1.
-
-### 4. Fold change
-
-The escape signal per variant is the ratio of derived to ancestral HMBR, on a log2 scale:
-
-$$\mathrm{FC} = \frac{\mathrm{HMBR}_D}{\mathrm{HMBR}_A}, \qquad \log_2 \mathrm{FC} = \log_2\!\left(\frac{\mathrm{HMBR}_D}{\mathrm{HMBR}_A}\right).$$
-
-A positive log2 fold change means the derived peptide binds more weakly (higher rank) than the ancestral one — predicted escape. Loci where both states are non-binding (HMBR_A > 2 and HMBR_D > 2) are removed first.
-
-### 5. Per-allele fold change (`--per-allele`)
-
-Fold change per allele instead of pooled, restricted to alleles where the ancestral peptide is at least a weak binder (r_{A,h} ≤ 2):
-
-$$\mathrm{FC}_h = \frac{r_{D,h}}{r_{A,h}}, \qquad \log_2 \mathrm{FC}_h = \log_2\!\left(\frac{r_{D,h}}{r_{A,h}}\right).$$
-
-### 6. Percentile benchmarking
-
-Observed fold changes are ranked against a background of comparator variants (real-world by default, or a simulated exhaustive single-nucleotide set). Let the background log2 fold-change values be y_1 … y_m, after dropping any background entry that matches an observed variant on its `Frame | Locus | Mutation` key. The empirical CDF is
-
-$$\hat{F}(x) = \frac{1}{m} \sum_{j=1}^{m} \mathbb{1}(y_j \le x),$$
-
-and each observed value x_i gets
-
-$$\text{Percentile}_i = 100 \, \hat{F}(x_i).$$
-
-### 7. Per-variant normal quantile (Z_i)
-
-Each percentile is mapped to a standard-normal quantile (probit), clamped to [0.01, 99.99] to keep it finite:
-
-$$Z_i = \Phi^{-1}\!\left(\frac{\text{Percentile}_i}{100}\right).$$
-
-The inverse normal CDF uses the Abramowitz & Stegun rational approximation.
-
-### 8. Stouffer's combined Z (`combined_z` row)
-
-The per-variant quantiles are combined across all k valid observed variants with Stouffer's method:
-
-$$Z = \frac{1}{\sqrt{k}} \sum_{i=1}^{k} Z_i, \qquad p = 1 - \Phi(Z).$$
-
-The p-value is one-tailed — it asks whether the observed variants are collectively shifted toward escape (higher percentiles) relative to the background.
-
-### 9. Empirical permutation test (`empirical_p` row)
-
-A non-parametric check on Stouffer's Z. Draw 99,999 samples of k background values without replacement; for each sample compute its mean percentile through the same CDF. With P̄_obs the mean percentile of the observed variants,
-
-$$p_{\text{emp}} = \frac{1}{B} \sum_{b=1}^{B} \mathbb{1}\!\left(\bar{P}_b \ge \bar{P}_{\text{obs}}\right), \qquad B = 99{,}999.$$
+**Percentile benchmarking.** Observed fold changes are ranked against a background of comparator variants — a real-world panel by default, or a simulated single-nucleotide set — after removing any background entry that matches an observed variant. Each observed variant gets a percentile from 0 to 100: its position in the background distribution. CD8scape also reports two summary measures of whether the observed variants are collectively shifted toward escape: a parametric combined score (`combined_z`, Stouffer's method over the per-variant percentiles) and a non-parametric permutation p-value (`empirical_p`) that repeatedly resamples the background for comparison.
 
 ## Output Files
 - `variants.csv`, `frames.csv`: parsed input data.
@@ -325,7 +257,7 @@ $$p_{\text{emp}} = \frac{1}{B} \sum_{b=1}^{B} \mathbb{1}\!\left(\bar{P}_b \ge \b
 - `per_allele_best_ranks.csv`: per-allele eluted-ligand best ranks and log2 fold changes for every allele in the genome, filtered to ancestral EL rank ≤ 2% (`Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`). Written when `--per-allele` is passed to `run` or `run_supertype`.
 - `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: simulated background variants and HMBR results (from `simulate` + `run`, used as the `--s` fallback background when there's no real-world dataset). A real-world background file has the same shape as `harmonic_mean_best_ranks.csv` but comes from a naturally occurring variant panel — name it whatever you like and pass it via `--s`.
 - `per_allele_best_ranks_simulated.csv`: per-allele results for the simulated background (from `simulate` + `run --per-allele`).
-- `percentile_harmonic_mean_best_ranks.csv`: observed HMBR with `Percentile`, `Z_i`, and `p_value` columns relative to the background, plus the `combined_z` (Stouffer's Z, mean percentile, one-tailed p-value) and `empirical_p` (empirical p-value from 99999 random k-samples) summary rows.
+- `percentile_harmonic_mean_best_ranks.csv`: observed HMBR with `Percentile`, `Z_i`, and `p_value` columns relative to the background, plus the `combined_z` (parametric combined score) and `empirical_p` (permutation p-value) summary rows.
 - `percentile_per_allele_best_ranks.csv`: observed per-allele fold changes with the same columns and summary rows (from `percentile --per-allele`).
 
 ## Advanced Configuration
