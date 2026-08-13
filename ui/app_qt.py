@@ -1606,14 +1606,11 @@ class RunPage(QWidget):
         pct_outer = QVBoxLayout(pct_box)
         pct_outer.setSpacing(10)
 
-        pct_desc = QLabel(
-            "Compare observed results against a simulated background to compute "
-            "enrichment percentiles.  When enabled, three extra steps run automatically: "
-            "simulate → run (simulated) → percentile."
-        )
-        pct_desc.setWordWrap(True)
-        pct_desc.setObjectName("lbl_info")
-        pct_outer.addWidget(pct_desc)
+        self._pct_desc = QLabel()
+        self._pct_desc.setWordWrap(True)
+        self._pct_desc.setObjectName("lbl_info")
+        self._set_pct_desc(external=False)
+        pct_outer.addWidget(self._pct_desc)
 
         self._pct_enable = QCheckBox("Include percentile analysis in this run")
         pct_outer.addWidget(self._pct_enable)
@@ -1766,9 +1763,29 @@ class RunPage(QWidget):
         except (ValueError, IndexError):
             return "simulated"
 
+    def _set_pct_desc(self, external: bool) -> None:
+        if external:
+            text = (
+                "Compare observed results against a background distribution to compute "
+                "enrichment percentiles, using your pre-existing background files "
+                "(recommended when you have real-world background data). "
+                "One extra step runs automatically: percentile."
+            )
+        else:
+            text = (
+                "Compare observed results against a background distribution to compute "
+                "enrichment percentiles.  A real-world background is recommended when "
+                "available — check 'Use pre-existing background files' below to point "
+                "directly at one.  Otherwise, a simulated background is generated as a "
+                "fallback: three extra steps run automatically: "
+                "simulate → run (simulated) → percentile."
+            )
+        self._pct_desc.setText(text)
+
     def _on_ext_bg_toggled(self, checked: bool) -> None:
         self._pct_ext_widget.setVisible(checked)
         self._pct_sim_opts.parentWidget().setVisible(not checked)
+        self._set_pct_desc(external=checked)
 
     def _browse_pct_file(self, line_edit: "QLineEdit", title: str) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -2008,7 +2025,13 @@ class ExecutePage(QWidget):
         # Snapshot run config so output highlighting is correct after the run
         # even if the user changes settings on the Run page mid-run.
         run_page = self._app.run_page
-        self._snap_run_suffix    = run_page.run_suffix()
+        # Use the effective suffix: run page's own suffix, or fall back to
+        # the prep suffix (which was injected into run_option_args above).
+        _run_sfx = run_page.run_suffix()
+        if not _run_sfx and "--suffix" in self._app.prep_option_args:
+            _idx = self._app.prep_option_args.index("--suffix")
+            _run_sfx = self._app.prep_option_args[_idx + 1]
+        self._snap_run_suffix    = _run_sfx
         self._snap_per_allele    = run_page.is_per_allele()
         self._snap_include_pct   = include_pct
         self._snap_pct_per_allele = "--per-allele" in run_page.percentile_option_args()
@@ -2044,11 +2067,19 @@ class ExecutePage(QWidget):
         )
 
         # Step 2 — run observed
+        # If the run options have no --suffix, inherit the prep suffix so that
+        # output files (harmonic_mean_best_ranks, etc.) share the same suffix
+        # as the input files produced by the prepare step.
         run_choice = choice_by_key(RUN_CHOICES, self._app.run_key)
+        run_option_args = self._app.run_option_args
+        if "--suffix" not in run_option_args and "--suffix" in self._app.prep_option_args:
+            idx = self._app.prep_option_args.index("--suffix")
+            prep_suffix = self._app.prep_option_args[idx + 1]
+            run_option_args = _inject_suffix(run_option_args, prep_suffix)
         run_args = (
             [run_choice.cli_command, folder]
             + run_choice.cli_fixed_args
-            + self._app.run_option_args
+            + run_option_args
         )
 
         steps = [prep_args, run_args]
@@ -2490,9 +2521,9 @@ class OutputPage(QWidget):
         names: set = set()
         if self._snap_include_pct:
             if self._snap_pct_per_allele:
-                names.add("percentile_per_allele_best_ranks.csv")
+                names.add(f"percentile_per_allele_best_ranks{sfx}.csv")
             else:
-                names.add("percentile_harmonic_mean_best_ranks.csv")
+                names.add(f"percentile_harmonic_mean_best_ranks{sfx}.csv")
             names.add(f"harmonic_mean_best_ranks{sfx}.csv")
             if self._snap_per_allele:
                 names.add(f"per_allele_best_ranks{sfx}.csv")
@@ -2754,12 +2785,21 @@ class OutputPage(QWidget):
     def _delete_outputs(self) -> None:
         if not self._output_files:
             return
-        names = "\n".join(f"  • {p.name}" for p in self._output_files if p.exists())
-        reply = QMessageBox.question(
-            self, "Delete output files?",
-            f"This will permanently delete:\n\n{names}\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
+        existing = [p for p in self._output_files if p.exists()]
+        max_shown = 20
+        shown = existing[:max_shown]
+        names = "\n".join(f"  • {p.name}" for p in shown)
+        if len(existing) > max_shown:
+            names += f"\n  … and {len(existing) - max_shown} more"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Delete output files?")
+        box.setText(f"This will permanently delete {len(existing)} file(s):")
+        box.setInformativeText(f"{names}\n\nContinue?")
+        box.setDetailedText("\n".join(p.name for p in existing))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        reply = box.exec()
         if reply != QMessageBox.StandardButton.Yes:
             return
         deleted, failed = 0, 0

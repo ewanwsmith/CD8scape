@@ -92,18 +92,22 @@ const FATE_RANK = Dict("synonymous"=>0, "stop_codon"=>1, "viable"=>2)
 function main()
     folder_path = ARGS[1]
     suffix = ""
+    variants_suffix = nothing   # if set, overrides suffix for reading variants.csv
     latest = true
     i = 2
     while i <= length(ARGS)
         a = ARGS[i]
         if a == "--suffix" && i + 1 <= length(ARGS); i += 1; suffix = ARGS[i]
+        elseif a == "--variants-suffix" && i + 1 <= length(ARGS); i += 1; variants_suffix = ARGS[i]
         elseif a == "--latest";    latest = true
         elseif a == "--no-latest"; latest = false
         end
         i += 1
     end
+    # Use variants_suffix if explicitly provided; otherwise fall back to suffix.
+    effective_variants_suffix = variants_suffix === nothing ? suffix : variants_suffix
 
-    variants_path = resolve_read(joinpath(folder_path, "variants.csv"); suffix=suffix, latest=latest)
+    variants_path = resolve_read(joinpath(folder_path, "variants.csv"); suffix=effective_variants_suffix, latest=latest)
     frames_path   = resolve_read(joinpath(folder_path, "frames.csv");   suffix="",     latest=latest)
 
     variants = CSV.read(variants_path, DataFrame; stringtype = String,
