@@ -160,6 +160,25 @@ function normalize_variant(ref::AbstractString, alt::AbstractString)
     return r, a, prefix_trim
 end
 
+"""
+Map a genomic locus to its 1-based position in the concatenated Consensus_sequence
+for a (possibly multi-segment) region string like "13442,13468;13468,16236".
+Returns nothing if the locus falls outside all segments.
+"""
+function locus_to_relative(locus::Int, region_str::AbstractString)::Union{Int,Nothing}
+    offset = 0
+    for seg in split(region_str, ';')
+        parts = split(seg, ',')
+        seg_start = parse(Int, parts[1])
+        seg_end   = parse(Int, parts[2])
+        if seg_start ≤ locus ≤ seg_end
+            return offset + (locus - seg_start + 1)
+        end
+        offset += seg_end - seg_start + 1
+    end
+    return nothing
+end
+
 function find_ref_match(consensus::AbstractString, ref::AbstractString, rl::Int; window::Int=10, max_mismatch::Int=0)
     seq = String(consensus)
     r = String(ref)
@@ -214,7 +233,8 @@ function check_locus(df::DataFrame)::DataFrame
         # By checking the full ref first we can skip normalization and ref-searching
         # entirely for overwritten loci, trusting the locus and codon from variants.csv
         # instead.  edit_ancestral_sequence then patches the ancestral sequence per-row.
-        orig_rl       = row.Locus - row.Start + 1
+        orig_rl_maybe = locus_to_relative(row.Locus, row.Region)
+        orig_rl       = orig_rl_maybe === nothing ? (row.Locus - row.Start + 1) : orig_rl_maybe
         full_ref_len  = length(ref)
         full_ref_ok   = (1 ≤ orig_rl &&
                          orig_rl + full_ref_len - 1 ≤ length(row.Consensus_sequence) &&
@@ -225,7 +245,8 @@ function check_locus(df::DataFrame)::DataFrame
             # optionally realign with find_ref_match for minor ref discrepancies.
             rn, an, prefix_trim = normalize_variant(ref, alt)
             adjn  = row.Locus + prefix_trim
-            rln   = adjn - row.Start + 1
+            rln_maybe = locus_to_relative(adjn, row.Region)
+            rln   = rln_maybe === nothing ? (adjn - row.Start + 1) : rln_maybe
             rn_match = (1 ≤ rln &&
                         rln + length(rn) - 1 ≤ length(row.Consensus_sequence) &&
                         row.Consensus_sequence[rln:(rln + length(rn) - 1)] == rn)
