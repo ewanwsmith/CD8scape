@@ -1,20 +1,20 @@
 # CD8scape
 
-CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or representative supertype panels.
+CD8scape runs netMHCpan on genetic variants, either for an individual's HLA genotype or for a representative supertype panel. It predicts whether a mutation weakens CD8+ T-cell recognition — i.e. immune escape.
 
 ## Features
-- Automated peptide generation for consensus and variant loci
-- MHC binding prediction using netMHCpan
-- Robust output parsing and best-rank calculation
-- Harmonic mean best rank (HMBR) and fold change analysis across the full allele panel
-- Per-allele log2 fold change output for every allele in the genome (`--per-allele`)
-- Simulated variant generation for percentile benchmarking
+- Peptide generation for consensus and variant loci
+- MHC binding prediction with netMHCpan
+- Output parsing and best-rank calculation
+- Harmonic mean best rank (HMBR) and fold change across the allele panel
+- Per-allele log2 fold change for every allele in the genome (`--per-allele`)
+- Percentile benchmarking against a background variant distribution — real-world data by default, simulated variants as a fallback
 
 ## Requirements
 - Perl 5
 - Julia v1.11+
-- [netMHCpan 4.2](https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/) (4.1 also supported)
-- Python 3.8+ and PyQt6 (desktop app only — PyQt6 is installed automatically on first launch)
+- [netMHCpan 4.2](https://services.healthtech.dtu.dk/services/NetMHCpan-4.2/) (4.1 also works)
+- Python 3.8+ and PyQt6 (desktop app only — PyQt6 installs itself on first launch)
 
 ## Installation
 1. Clone the repository:
@@ -31,46 +31,55 @@ CD8scape runs netMHCpan on genetic variants for individual HLA genotypes or repr
    ```bash
    ./CD8scape.jl prep
    ```
-   This activates the project environment, installs required Julia packages, validates the netMHCpan path, and checks that Perl is available.
+   This activates the project environment, installs the Julia packages, validates the netMHCpan path, and checks that Perl is available.
 
 ## Desktop app
 
-CD8scape includes a graphical desktop app as an alternative to the command-line interface.
+There's a PyQt6 desktop app if you'd rather not use the command line. It's a thin wrapper: every action builds and runs a `./CD8scape.jl <command> [flags…]` call and streams the output live, so file discovery, variant parsing, and error messages all come from CD8scape itself, not from separate GUI code. See `ui/README.md` for the internals.
 
 **Launch:**
-- **macOS**: double-click `launch.command` in Finder. A Terminal window opens while the app is running.
+- **macOS**: double-click `launch.command` in Finder (or run `python launch.py` from a terminal). A Terminal window stays open while the app runs.
 - **Windows**: double-click `launch.bat`.
 
-PyQt6 is installed automatically into your Python environment the first time you run the launcher.
+PyQt6 installs into your Python environment the first time you run the launcher — no manual `pip install`. `src/settings.txt` (the netMHCpan path) is created and validated from inside the app, so if you only use the GUI you can skip steps 2–3 above.
 
-The app is a step-by-step wizard:
+The app is a wizard, one page per pipeline stage:
 
-1. **Setup** — enter your netMHCpan path, verify Perl is available, and install Julia dependencies. This replaces steps 2–3 of the command-line installation above and only needs to be done once per machine.
-2. **Data** — choose an example dataset or point to your own data folder.
-3. **Prepare** — select input type (nucleotide or amino acid) and any advanced options.
-4. **Run** — select analysis type (individual genotype, supertype panel, or percentile benchmarking) and options.
-5. **Execute** — run the pipeline and watch the output live.
-6. **Output** — browse, open, or delete the files produced by the run.
+| Step | Page | What it does |
+|---|---|---|
+| 1 | **Setup** | Enter your netMHCpan path, check Perl is available, and install Julia dependencies (same as `./CD8scape.jl prep`). Once per machine. |
+| 2 | **Data** | Pick an example dataset or point to your own data folder. |
+| 3 | **Prepare** | Choose input type (nucleotide VCF/Samfire or amino-acid `.aa`) and parsing options (same as `read`/`simulate`). |
+| 4 | **Run** | Pick analysis type — individual genotype, supertype panel, or percentile benchmarking (against a real-world background file, or a simulated one) — plus options like `--per-allele`, `--verbose`, and thread count. |
+| 5 | **Execute** | Run the pipeline and watch stdout/stderr live, with an estimated time remaining. |
+| 6 | **Output** | Browse and open results, preview a table for the selected file, save everything as a ZIP, or delete the run's output. |
+
+### Troubleshooting
+
+- **PyQt6 won't install**: the launcher installs it into your current Python 3.8+ environment. If that fails, run `pip install PyQt6` yourself and re-launch.
+- **netMHCpan path rejected on the Setup page**: the app validates the path exactly as `CD8scape.jl prep` does — point it at the netMHCpan executable, not the folder containing it.
+- **macOS "app can't be opened" warning**: right-click `launch.command` → Open the first time to get past Gatekeeper (the script is unsigned).
+- **Output page slow to load, or a very long delete confirmation**: this comes from `--verbose` runs, which keep per-allele logs and temp files. The delete dialog summarises large file lists rather than printing every name; use **Show Details…** to see the full list.
 
 ## Input Data
 
-CD8scape expects a data folder containing the following files:
+CD8scape reads a data folder containing:
 
-- **alleles.txt**: List of HLA alleles, one per line (e.g. `HLA-A03:01`). Required for `run`.
-- **supertype_panel.csv**: CSV with columns `Allele` and `Frequency` (and optionally `Locus`). Required for `run_supertype`. Can also be placed in the data folder to override the project default.
-- **Variant file** (one of the following):
-  - `.vcf` or `.vcf.gz` file (standard variant call format).
+- **alleles.txt**: HLA alleles, one per line (e.g. `HLA-A03:01`). Required for `run`.
+- **supertype_panel.csv**: columns `Allele` and `Frequency` (and optionally `Locus`). Required for `run_supertype`. Drop it in the data folder to override the project default.
+- **Variant file**, one of:
+  - `.vcf` or `.vcf.gz` (standard variant call format).
   - `single_locus_trajectories.out` from [Samfire](https://github.com/cjri/samfire) (also matches any `single_locus_trajectories*.out`, or falls back to any `.out` file in the folder).
-  - A `.aa` amino-acid variant file — used when `read` is run with `--aa` (see below).
-- **Reading frame file** (one of the following):
-  - `sequences.fasta` **and** `consensus.fa` for the NCBI path: `sequences.fasta` provides ORF definitions with coordinate headers (e.g. from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)), and `consensus.fa` provides the full reference genome from which reading frame subsequences are extracted.
+  - A `.aa` amino-acid variant file, used when `read` is run with `--aa` (see below).
+- **Reading frame file**, one of:
+  - `sequences.fasta` **and** `consensus.fa` for the NCBI path: `sequences.fasta` gives ORF definitions with coordinate headers (e.g. from [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/)), and `consensus.fa` gives the full reference genome that reading-frame subsequences are cut from.
   - `Reading_Frames.dat` from [Samfire](https://github.com/cjri/samfire).
 
-CD8scape will automatically detect and use the appropriate files for variant and reading frame parsing. VCF files are tried first; if no VCF is found or parsing fails, Samfire trajectory parsing is attempted. When `--aa` is passed to `read`, amino-acid variants are read instead. For reading frames, the NCBI path (`sequences.fasta` + `consensus.fa`) is tried first, falling back to Samfire's `Reading_Frames.dat`.
+CD8scape picks the right files automatically. It tries VCF first; if there's no VCF, or parsing fails, it falls back to Samfire trajectories. Pass `--aa` to `read` to read amino-acid variants instead. For reading frames it tries the NCBI path (`sequences.fasta` + `consensus.fa`) first, then falls back to Samfire's `Reading_Frames.dat`.
 
 ### Amino-acid variant file format (`.aa`)
 
-The `.aa` format specifies variants directly at the amino-acid level — for example, to replicate substitutions reported in the literature without underlying sequence data. Pass `--aa` to the `read` command to use this format.
+The `.aa` format sets variants directly at the amino-acid level — for instance, to reproduce substitutions from a paper when you don't have the underlying sequence data. Pass `--aa` to `read` to use it.
 
 Each variant is two lines:
 ```
@@ -78,7 +87,7 @@ Each variant is two lines:
 <ancestral_aa> <derived_aa>
 ```
 
-- `orf_name` must exactly match a `Description` value in `frames.csv` (set by the reading frame file).
+- `orf_name` must match a `Description` value in `frames.csv` (set by the reading frame file) exactly.
 - `aa_position` is 1-based within the translated protein.
 - `ancestral_aa` and `derived_aa` are single-letter amino acid codes.
 - Blank lines between records are ignored.
@@ -92,7 +101,7 @@ Orf1 45
 A T
 ```
 
-Canonical codons are always used for both ancestral and derived amino acids, regardless of the actual consensus sequence. This means substitutions can be forced even when the consensus at that position does not encode the specified ancestral amino acid (e.g. when replicating published results without access to the original sequence data). A warning is printed and the frames file is updated in place whenever a consensus mismatch is overridden.
+Canonical codons are used for both the ancestral and derived amino acids, regardless of the consensus sequence. So you can force a substitution even where the consensus at that position doesn't encode the stated ancestral amino acid (e.g. reproducing published results without the original data). When a consensus mismatch is overridden, CD8scape prints a warning and updates the frames file in place.
 
 ### Example: alleles.txt
 ```
@@ -141,113 +150,204 @@ Amino-acid variant input (use `read --aa`):
     consensus.fa                    # full reference genome
 ```
 
-For Samfire, see [Samfire GitHub](https://github.com/cjri/samfire) for details on generating `.out` and `.dat` files.
+For Samfire, see the [Samfire GitHub](https://github.com/cjri/samfire) for how to generate the `.out` and `.dat` files.
 
 ## Usage
-All commands are run from the repository root:
+Run every command from the repository root.
 
 ### 1. Prepare Environment
 ```bash
 ./CD8scape.jl prep
 ```
-Note: `prep` performs all dependency installation and environment setup. The other commands (`read`, `simulate`, `run`, `run_supertype`, `percentile`) do not install packages and assume the environment is already prepared.
+`prep` does all the dependency installation and setup. The other commands (`read`, `simulate`, `run`, `run_supertype`, `percentile`) install nothing and assume the environment is already prepared.
 
 ### 2. Parse Input Data
 ```bash
 ./CD8scape.jl read <folder_path> [--aa] [--suffix <name>] [--latest|--no-latest]
 ```
-Parses variants and reading frames from the data folder, producing `variants.csv` and `frames.csv`.
-- `--aa`: read amino-acid variants from a `.aa` file instead of VCF or Samfire trajectories (see [Amino-acid variant file format](#amino-acid-variant-file-format-aa) above).
+Parses variants and reading frames from the data folder into `variants.csv` and `frames.csv`.
+- `--aa`: read amino-acid variants from a `.aa` file instead of VCF or Samfire trajectories (see [Amino-acid variant file format](#amino-acid-variant-file-format-aa)).
 
-### 3. Simulate Input Data
-```bash
-./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
-```
-- Parses reading frames (writes `frames.csv`) and generates exhaustive simulated single-nucleotide variants per reading frame (writes `variants.csv`).
-- Sampling options:
-   - `--n <count>`: sample an absolute number of variants.
-   - `--p <proportion>` (alias `--prop`): sample a proportion in (0,1).
-   - If both `--n` and `--p` are provided, `--n` takes precedence.
-- Defaults: `--n` defaults to `1000` and `--p` defaults to `0.1` when the flag is provided without a value; omitting both flags writes all variants. `--seed` sets RNG seed (default: `1320`).
-
-### 4. Run Pipeline (Individual Genotype)
+### 3. Run Pipeline (Individual Genotype)
 ```bash
 ./CD8scape.jl run <folder_path> [--t <N|max>|--thread <N|max>] [--per-allele] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
-- Generates peptides, runs netMHCpan, parses output, calculates best ranks and fold changes.
-- `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). Use `max` to use all available threads up to the safety cap (overridable via `CD8SCAPE_MAX_THREADS`).
-- `--verbose`: preserve per-allele logs and temp files for debugging.
-- `--per-allele`: compute log2 fold change for every allele in the genome individually. Only alleles where the ancestral EL rank is ≤ 2% are included. Writes a separate `per_allele_best_ranks.csv` with columns `Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, and `log2_foldchange_BR`.
+Generates peptides, runs netMHCpan, parses the output, and calculates best ranks and fold changes.
+- `--t`/`--thread`: max parallel chunks for netMHCpan (default: 1). `max` uses all available threads up to the safety cap (override with `CD8SCAPE_MAX_THREADS`).
+- `--verbose`: keep per-allele logs and temp files for debugging.
+- `--per-allele`: compute log2 fold change for every allele in the genome separately. Only alleles with an ancestral EL rank ≤ 2% are included. Writes `per_allele_best_ranks.csv` with columns `Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`.
 
-### 5. Run Pipeline (Supertype Panel)
+### 4. Run Pipeline (Supertype Panel)
 ```bash
 ./CD8scape.jl run_supertype <folder_path> [--t <N|max>|--thread <N|max>] [--per-allele] [--verbose] [--suffix <name>] [--latest|--no-latest]
 ```
-- As above, but uses a representative supertype HLA panel.
-- `--per-allele` is available but note that panel alleles are population-frequency surrogates rather than an individual's genotype, so per-allele results reflect population-level coverage rather than individual immunogenicity.
+Same as `run`, but uses a representative supertype HLA panel.
+- `--per-allele` works here too, but panel alleles are population-frequency surrogates, not an individual's genotype — so per-allele results reflect population coverage rather than one person's immunogenicity.
+
+### 5. Simulate Input Data (optional — fallback background)
+
+Percentile benchmarking (step 6) compares your observed variants against a background of comparator variants. Use a **real-world background** where you can: a `harmonic_mean_best_ranks.csv` from running steps 2 and 3/4 on a large panel of naturally occurring variants (e.g. surveillance or consensus data for the pathogen). `simulate` builds a **synthetic background** instead — for when no real-world dataset exists, or when you specifically want an unbiased null where every possible single-nucleotide substitution is equally likely. Skip this step if you already have a real-world background to pass to `percentile --s`.
+
+```bash
+./CD8scape.jl simulate <folder_path> [--n <count>] [--p <proportion>] [--seed <int>] [--suffix <name>] [--latest|--no-latest]
+```
+- Parses reading frames (`frames.csv`) and generates every single-nucleotide variant per reading frame (`variants.csv`).
+- Sampling:
+   - `--n <count>`: sample an absolute number of variants.
+   - `--p <proportion>` (alias `--prop`): sample a proportion in (0,1).
+   - If both are given, `--n` wins.
+- Defaults: `--n` defaults to `1000` and `--p` to `0.1` when the flag is given without a value; omit both to write all variants. `--seed` sets the RNG seed (default: `1320`).
+- After simulating, run step 3 or 4 again on the simulated data (with a `--suffix` like `simulated`) to produce the `harmonic_mean_best_ranks_simulated.csv` background used below.
 
 ### 6. Compute Percentiles (Benchmarking)
 ```bash
-./CD8scape.jl percentile <folder_path> [--per-allele] [--s <sim_file>] [--o <obs_file>]
+./CD8scape.jl percentile <folder_path> [--per-allele] [--s <background_file>] [--o <obs_file>]
 ```
-- Computes observed log2 fold-change percentiles relative to a simulated distribution.
-- By default operates on HMBR fold changes (`harmonic_mean_best_ranks.csv`).
-- `--per-allele`: operate on per-allele fold changes instead (`per_allele_best_ranks.csv`). Percentiles are computed per allele rather than per variant.
-- `--s <sim_file>`: path to the simulated file (defaults to `harmonic_mean_best_ranks_simulated.csv` or `per_allele_best_ranks_simulated.csv` depending on mode).
-- `--o <obs_file>`: path to the observed file (defaults to the most recent matching file in the data folder, excluding `_simulated`).
-- Observed variants are excluded from the simulated distribution before computing percentiles.
-- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv` to the data folder. Columns added: `Percentile` (0–100), `Z_i` (per-variant normal quantile of the percentile), and `p_value` (empty for individual variants). Two summary rows are appended:
-  - `combined_z`: Stouffer's combined Z score (parametric), mean percentile across all k variants, and a one-tailed p-value.
-  - `empirical_p`: empirical p-value from 99999 random draws of k variants (without replacement) from the simulated distribution, comparing their mean percentile to the observed mean percentile. Provides a non-parametric complement to Stouffer's Z.
+- Computes observed log2 fold-change percentiles against a background of comparator variants.
+- Works on HMBR fold changes (`harmonic_mean_best_ranks.csv`) by default.
+- **Background — two options for `--s`:**
+  - **Real-world (recommended)**: point `--s` at a `harmonic_mean_best_ranks(_suffix).csv` built by running `read` + `run`/`run_supertype` (steps 2 and 3/4) on naturally occurring variants. This benchmarks against variation actually seen in circulating strains. Skip `simulate` entirely in this mode.
+  - **Simulated (fallback)**: run `simulate` + `run`/`run_supertype` (step 5, then 3/4 again) to build `harmonic_mean_best_ranks_simulated.csv` and pass that as `--s`. Use it when there's no real-world dataset, or when you want an exhaustive/sampled set of synthetic substitutions.
+- `--per-allele`: work on per-allele fold changes instead (`per_allele_best_ranks.csv`). Percentiles are computed per allele rather than per variant.
+- `--s <background_file>`: the background comparator file. Defaults to `harmonic_mean_best_ranks_simulated.csv` (or `per_allele_best_ranks_simulated.csv` with `--per-allele`) — pass a real-world file explicitly to use one.
+- `--o <obs_file>`: the observed file (defaults to the most recent match in the data folder, excluding `_simulated`).
+- Observed variants are dropped from the background before percentiles are computed.
+- Writes `percentile_harmonic_mean_best_ranks.csv` or `percentile_per_allele_best_ranks.csv`. Added columns: `Percentile` (0–100), `Z_i` (per-variant normal quantile of the percentile), and `p_value` (empty for individual variants). Two summary rows are appended:
+  - `combined_z`: Stouffer's combined Z (parametric), mean percentile across all k variants, one-tailed p-value.
+  - `empirical_p`: empirical p-value from 99999 random draws of k variants (without replacement) from the background, comparing their mean percentile to the observed mean. A non-parametric check on Stouffer's Z.
+
+The desktop app exposes the real-world path as a **"Use pre-existing background files"** toggle on the Run page. Turning it on skips the simulate step and the extra run-on-simulated pass, and calls `percentile` straight against the background and observed CSVs you point it at — 3 steps instead of 5.
 
 ### Global Options
 
-The following options are shared across `read`, `simulate`, `run`, and `run_supertype`:
+These are shared across `read`, `simulate`, `run`, and `run_supertype`:
 
-- **`--suffix <name>`**: Append `_<name>` before the file extension of all output files. For example, `--suffix foo` produces `variants_foo.csv`, `best_ranks_foo.csv`, `harmonic_mean_best_ranks_foo.csv`, etc. For `simulate`, the suffix defaults to `simulated` when omitted.
-- **`--latest`** (default) / **`--no-latest`**: Controls how input files are resolved when no `--suffix` is given and multiple candidates exist (e.g. `frames.csv` and `frames_simulated.csv`). `--latest` picks the most recently modified file; `--no-latest` raises an error on ambiguity.
+- **`--suffix <name>`**: insert `_<name>` before the extension of every output file. `--suffix foo` gives `variants_foo.csv`, `best_ranks_foo.csv`, `harmonic_mean_best_ranks_foo.csv`, and so on. For `simulate`, the suffix defaults to `simulated`.
+- **`--latest`** (default) / **`--no-latest`**: how input files are resolved when there's no `--suffix` and several candidates exist (e.g. `frames.csv` and `frames_simulated.csv`). `--latest` takes the most recently modified file; `--no-latest` errors on ambiguity.
 
-These options allow multiple independent analyses (e.g. observed vs. simulated) to coexist in the same data folder without overwriting each other.
+Together these let several analyses (e.g. observed vs. simulated) sit in one data folder without overwriting each other.
 
 ## Workflow Summary
-1. **prep**: Install dependencies
-2. **read**: Parse variants and frames from real data
-3. **simulate**: Generate simulated single-nucleotide variants from reading frames
-4. **run/run_supertype**: Generate peptides, predict binding, process output, calculate best ranks and fold changes. Add `--per-allele` to also produce per-allele fold changes.
-5. **percentile**: Compare observed fold changes to the simulated distribution. Add `--per-allele` to benchmark per-allele fold changes instead of HMBR.
+1. **prep**: install dependencies.
+2. **read**: parse variants and frames from real data.
+3. **run/run_supertype**: generate peptides, predict binding, process output, and calculate best ranks and fold changes for your observed data. Add `--per-allele` for per-allele fold changes.
+4. **simulate** *(optional, right before percentile)*: generate a synthetic background of single-nucleotide variants, then run step 3 on it (with a `--suffix`). Only needed if you don't already have a real-world background — skip to step 5 if you do.
+5. **percentile**: compare observed fold changes to a background — real-world by default (`--s <background_file>`, built by running steps 2–3 on a real variant panel), or the simulated one from step 4. Add `--per-allele` to benchmark per-allele fold changes instead of HMBR.
+
+## Methods
+
+The maths behind each stage. Equations render on GitHub (via MathJax); some plain-text Markdown viewers show the raw LaTeX instead.
+
+netMHCpan reports an eluted-ligand percentile rank (EL %rank) for each peptide–allele pair: the rank of the peptide's raw score against a background of random natural peptides for that allele. Lower ranks mean stronger predicted antigen presentation. The usual cut-offs are ≤ 0.5% for strong binders and ≤ 2% for weak binders; CD8scape uses ≤ 2% as its binding filter.
+
+### 1. Peptide generation
+
+Take a non-synonymous variant at amino-acid position *a* in an ORF's translated protein of length *L*. CD8scape enumerates every peptide of length 8–11 whose window covers the mutated residue. A peptide starting at position *i* with length *ℓ* spans positions *i* to *i + ℓ − 1*, and is kept when
+
+$$i \le a \le i + \ell - 1, \qquad 1 \le i \le L - \ell + 1.$$
+
+That's up to 8 + 9 + 10 + 11 = 38 peptides per state (fewer near the termini), for both the ancestral state A (consensus residue) and the derived state D (variant residue). Peptides that are synonymous (A and D identical) or contain a stop codon (`*`) are dropped.
+
+### 2. Best rank per allele
+
+netMHCpan scores every peptide against each HLA allele. For a variant locus, state s (A or D), and allele h, the best rank is the minimum EL %rank over the set of peptides spanning the mutated residue:
+
+$$r_{s,h} = \min_{p} \; \mathrm{EL\%rank}(p, h).$$
+
+These are `ELBR_A` and `ELBR_D` in the per-allele output.
+
+### 3. Harmonic mean best rank (HMBR)
+
+Best ranks are pooled across the allele panel with a harmonic mean. The harmonic mean is pulled toward the smallest ranks — the strongest binders — which is what you want, since recognition is driven by the single best-presented peptide.
+
+Individual genotype, over n alleles (unweighted):
+
+$$\mathrm{HMBR}_s = \frac{n}{\displaystyle\sum_{h=1}^{n} \frac{1}{r_{s,h}}}.$$
+
+Supertype panel, weighted by each allele's population frequency w:
+
+$$\mathrm{HMBR}_s = \frac{\displaystyle\sum_{h} w_h}{\displaystyle\sum_{h} \frac{w_h}{r_{s,h}}}.$$
+
+Only positive ranks count. The unweighted form is just the weighted one with every w = 1.
+
+### 4. Fold change
+
+The escape signal per variant is the ratio of derived to ancestral HMBR, on a log2 scale:
+
+$$\mathrm{FC} = \frac{\mathrm{HMBR}_D}{\mathrm{HMBR}_A}, \qquad \log_2 \mathrm{FC} = \log_2\!\left(\frac{\mathrm{HMBR}_D}{\mathrm{HMBR}_A}\right).$$
+
+A positive log2 fold change means the derived peptide binds more weakly (higher rank) than the ancestral one — predicted escape. Loci where both states are non-binding (HMBR_A > 2 and HMBR_D > 2) are removed first.
+
+### 5. Per-allele fold change (`--per-allele`)
+
+Fold change per allele instead of pooled, restricted to alleles where the ancestral peptide is at least a weak binder (r_{A,h} ≤ 2):
+
+$$\mathrm{FC}_h = \frac{r_{D,h}}{r_{A,h}}, \qquad \log_2 \mathrm{FC}_h = \log_2\!\left(\frac{r_{D,h}}{r_{A,h}}\right).$$
+
+### 6. Percentile benchmarking
+
+Observed fold changes are ranked against a background of comparator variants (real-world by default, or a simulated exhaustive single-nucleotide set). Let the background log2 fold-change values be y_1 … y_m, after dropping any background entry that matches an observed variant on its `Frame | Locus | Mutation` key. The empirical CDF is
+
+$$\hat{F}(x) = \frac{1}{m} \sum_{j=1}^{m} \mathbb{1}(y_j \le x),$$
+
+and each observed value x_i gets
+
+$$\text{Percentile}_i = 100 \, \hat{F}(x_i).$$
+
+### 7. Per-variant normal quantile (Z_i)
+
+Each percentile is mapped to a standard-normal quantile (probit), clamped to [0.01, 99.99] to keep it finite:
+
+$$Z_i = \Phi^{-1}\!\left(\frac{\text{Percentile}_i}{100}\right).$$
+
+The inverse normal CDF uses the Abramowitz & Stegun rational approximation.
+
+### 8. Stouffer's combined Z (`combined_z` row)
+
+The per-variant quantiles are combined across all k valid observed variants with Stouffer's method:
+
+$$Z = \frac{1}{\sqrt{k}} \sum_{i=1}^{k} Z_i, \qquad p = 1 - \Phi(Z).$$
+
+The p-value is one-tailed — it asks whether the observed variants are collectively shifted toward escape (higher percentiles) relative to the background.
+
+### 9. Empirical permutation test (`empirical_p` row)
+
+A non-parametric check on Stouffer's Z. Draw 99,999 samples of k background values without replacement; for each sample compute its mean percentile through the same CDF. With P̄_obs the mean percentile of the observed variants,
+
+$$p_{\text{emp}} = \frac{1}{B} \sum_{b=1}^{B} \mathbb{1}\!\left(\bar{P}_b \ge \bar{P}_{\text{obs}}\right), \qquad B = 99{,}999.$$
 
 ## Output Files
-- `variants.csv`, `frames.csv`: Parsed input data
-- `Peptides.pep`, `peptides_labels.csv`: Generated peptides and labels
-- `netMHCpan_output.tsv`, `processed_output.csv`: Raw and processed netMHCpan results
-- `best_ranks.csv`: Per-allele best EL ranks for ancestral and derived peptides at each locus.
-- `harmonic_mean_best_ranks.csv`: Harmonic mean best ranks (HMBR) and log2 fold changes aggregated across the panel (`Frame`, `Locus`, `Mutation`, `HMBR_A`, `HMBR_D`, `foldchange_HMBR`, `log2_foldchange_HMBR`).
-- `per_allele_best_ranks.csv`: Per-allele eluted ligand best ranks and log2 fold changes for every allele in the genome, filtered to ancestral EL rank ≤ 2% (`Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`). Written when `--per-allele` is passed to `run` or `run_supertype`.
-- `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: Simulated variant data and HMBR results (produced by `simulate` + `run`).
-- `per_allele_best_ranks_simulated.csv`: Per-allele results for simulated variants (produced by `simulate` + `run --per-allele`).
-- `percentile_harmonic_mean_best_ranks.csv`: Observed HMBR with `Percentile`, `Z_i`, and `p_value` columns relative to the simulated distribution, plus `combined_z` (Stouffer's Z, mean percentile, one-tailed p-value) and `empirical_p` (empirical p-value from 99999 random k-samples) summary rows.
-- `percentile_per_allele_best_ranks.csv`: Observed per-allele fold changes with the same columns and summary rows (written by `percentile --per-allele`).
+- `variants.csv`, `frames.csv`: parsed input data.
+- `Peptides.pep`, `peptides_labels.csv`: generated peptides and labels.
+- `netMHCpan_output.tsv`, `processed_output.csv`: raw and processed netMHCpan results.
+- `best_ranks.csv`: per-allele best EL ranks for ancestral and derived peptides at each locus.
+- `harmonic_mean_best_ranks.csv`: HMBR and log2 fold changes pooled across the panel (`Frame`, `Locus`, `Mutation`, `HMBR_A`, `HMBR_D`, `foldchange_HMBR`, `log2_foldchange_HMBR`).
+- `per_allele_best_ranks.csv`: per-allele eluted-ligand best ranks and log2 fold changes for every allele in the genome, filtered to ancestral EL rank ≤ 2% (`Frame`, `Locus`, `Mutation`, `MHC`, `ELBR_A`, `ELBR_D`, `foldchange_BR`, `log2_foldchange_BR`). Written when `--per-allele` is passed to `run` or `run_supertype`.
+- `variants_simulated.csv`, `harmonic_mean_best_ranks_simulated.csv`: simulated background variants and HMBR results (from `simulate` + `run`, used as the `--s` fallback background when there's no real-world dataset). A real-world background file has the same shape as `harmonic_mean_best_ranks.csv` but comes from a naturally occurring variant panel — name it whatever you like and pass it via `--s`.
+- `per_allele_best_ranks_simulated.csv`: per-allele results for the simulated background (from `simulate` + `run --per-allele`).
+- `percentile_harmonic_mean_best_ranks.csv`: observed HMBR with `Percentile`, `Z_i`, and `p_value` columns relative to the background, plus the `combined_z` (Stouffer's Z, mean percentile, one-tailed p-value) and `empirical_p` (empirical p-value from 99999 random k-samples) summary rows.
+- `percentile_per_allele_best_ranks.csv`: observed per-allele fold changes with the same columns and summary rows (from `percentile --per-allele`).
 
 ## Advanced Configuration
 
-The following environment variables can be set to override internal defaults for large-panel or resource-constrained runs:
+Set these environment variables to override internal defaults for large-panel or resource-constrained runs:
 
 | Variable | Default | Description |
 |---|---|---|
 | `CD8SCAPE_MAX_THREADS` | 8 | Safety cap on parallel netMHCpan chunks when `--t max` is used. |
-| `CD8SCAPE_ALLELE_CHAR_LIMIT` | 1023 | Maximum character length of the allele string passed to a single netMHCpan call. Alleles are batched when this limit would be exceeded. |
-| `CD8SCAPE_ALLELE_COUNT_LIMIT` | 75 | Maximum number of alleles passed to a single netMHCpan call. Alleles are batched when this limit would be exceeded. |
+| `CD8SCAPE_ALLELE_CHAR_LIMIT` | 1023 | Max character length of the allele string passed to a single netMHCpan call. Alleles are batched past this limit. |
+| `CD8SCAPE_ALLELE_COUNT_LIMIT` | 75 | Max number of alleles passed to a single netMHCpan call. Alleles are batched past this limit. |
 
 ## Example Data
 
-`data/Example_data/` contains a minimal synthetic dataset for quickly testing the pipeline end-to-end. It includes a 53-amino-acid ORF, two amino-acid variants (`.aa` format), a three-allele genotype, and a small supertype panel.
+`data/Example_data/` is a minimal synthetic dataset for testing the pipeline end to end. It has a 53-amino-acid ORF, two amino-acid variants (`.aa` format), a three-allele genotype, and a small supertype panel.
 
 Real-world SARS-CoV-2 data used in development is in `data/Stanevich_et_al/`.
 
 ## Citation
-If you use CD8scape in your research, please cite the repository and netMHCpan as appropriate.
+If you use CD8scape, please cite the repository and netMHCpan.
 
-Real-world example data (`data/Stanevich_et_al/`) is from:
+The real-world example data (`data/Stanevich_et_al/`) is from:
 Stanevich, O.V., Alekseeva, E.I., Sergeeva, M. et al. SARS-CoV-2 escape from cytotoxic T cells during long-term COVID-19. Nat Commun 14, 149 (2023). https://doi.org/10.1038/s41467-022-34033-x
 
 
