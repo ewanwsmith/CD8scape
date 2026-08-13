@@ -309,7 +309,7 @@ function main()
     # allele cols from all batches in order), then vertically concatenate chunks.
     # Detect and strip trailing "Ave"/"NB" summary cols that netMHCpan 4.2 appends.
     print("\n")
-    status("Merging chunk outputs into $xlsfile_path ...")
+    status("Merging → $xlsfile_path")
     open(xlsfile_path, "w") do out_io
         println(out_io, "\t\t" * join(allele_list, '\t'))
 
@@ -347,7 +347,7 @@ function main()
         end
     end
     # Cleanup temp files
-    status("Cleaning up temporary files...")
+    status("Cleaning up...")
     del_pep = 0; del_out = 0; del_logs = 0
     keep_pep = 0; keep_out = 0; keep_logs = 0
     kept_logs_list = String[]

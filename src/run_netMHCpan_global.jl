@@ -500,7 +500,7 @@ function main()
     # These are row-level averages (not per-allele); we detect and strip them so the output
     # has exactly 4 cols per allele, which process_output.pl requires.
     print("\n")
-    status("Merging chunk outputs into $xlsfile_path ...")
+    status("Merging → $xlsfile_path")
 
     open(xlsfile_path, "w") do out_io
         # Line 1: allele names (tab-separated, two leading tabs) for process_output.pl
@@ -545,7 +545,7 @@ function main()
 
     status("Merged output written to $xlsfile_path")
     # Cleanup temp files
-    status("Cleaning up temporary files...")
+    status("Cleaning up...")
     del_pep = 0; del_out = 0; del_logs = 0
     keep_pep = 0; keep_out = 0; keep_logs = 0
     kept_logs_list = String[]

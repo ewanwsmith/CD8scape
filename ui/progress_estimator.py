@@ -76,22 +76,21 @@ Ordered milestones map known log-line patterns to positions (0.0–1.0) in the
 post-processing window.  Fractions only ever advance (high-watermark).
 
     process_scores.jl phase:
-        "Sorting by Locus"           → 0.08
-        "Saving results to"          → 0.18
-        "Processing completed"       → 0.28
+        "Sorting\.\.\."              → 0.08
+        "Saved processed peptides"   → 0.18
 
     process_best_ranks.jl phase:
-        "Reading input file:"        → 0.32
-        "Streaming CSV to compute"   → 0.36
+        "Reading:"                   → 0.32
+        "Scanning rows"              → 0.36
         "rows scanned"               → nudge (+0.03 each, cap 0.70)
-        "Successfully processed"     → 0.72
-        "Materialising.*ancestral"   → 0.77
-        "Found best ranks for anc"   → 0.81
-        "Materialising.*derived"     → 0.84
-        "Found best ranks for der"   → 0.87
-        "Saved best ranks to"        → 0.91
-        "Calculating harmonic"       → 0.93
-        "Saved harmonic mean"        → 0.97
+        "rows processed"             → 0.72
+        "Building ancestral"         → 0.77
+        "ancestral entries"          → 0.81
+        "Building derived"           → 0.84
+        "derived entries"            → 0.87
+        "Saved best ranks:"          → 0.91
+        "Computing HMBR"             → 0.93
+        "Saved HMBR:"                → 0.97
 
     variant_fates.jl phase:
         "variant_fates.*written"     → 1.00
@@ -128,19 +127,18 @@ _RE_ROWS = re.compile(r"(\d+)M rows scanned", re.IGNORECASE)
 # Ordered by expected appearance in the log.  Each entry advances the
 # post-processing fraction only if it's larger than the current value.
 _POST_MILESTONES: List[Tuple[re.Pattern, float]] = [
-    (re.compile(r"Sorting by Locus",                  re.I), 0.08),
-    (re.compile(r"Saving results to",                 re.I), 0.18),
-    (re.compile(r"Processing completed",              re.I), 0.28),
-    (re.compile(r"Reading input file:",               re.I), 0.32),
-    (re.compile(r"Streaming CSV to compute",          re.I), 0.36),
-    (re.compile(r"Successfully processed",            re.I), 0.72),
-    (re.compile(r"Materialising.*ancestral",          re.I), 0.77),
-    (re.compile(r"Found best ranks for anc",          re.I), 0.81),
-    (re.compile(r"Materialising.*derived",            re.I), 0.84),
-    (re.compile(r"Found best ranks for der",          re.I), 0.87),
-    (re.compile(r"Saved best ranks to",               re.I), 0.91),
-    (re.compile(r"Calculating harmonic",              re.I), 0.93),
-    (re.compile(r"Saved harmonic mean",               re.I), 0.97),
+    (re.compile(r"Sorting\.\.\.",                     re.I), 0.08),
+    (re.compile(r"Saved processed peptides",          re.I), 0.18),
+    (re.compile(r"Reading:",                          re.I), 0.32),
+    (re.compile(r"Scanning rows",                     re.I), 0.36),
+    (re.compile(r"rows processed",                    re.I), 0.72),
+    (re.compile(r"Building ancestral",                re.I), 0.77),
+    (re.compile(r"ancestral entries",                 re.I), 0.81),
+    (re.compile(r"Building derived",                  re.I), 0.84),
+    (re.compile(r"derived entries",                   re.I), 0.87),
+    (re.compile(r"Saved best ranks:",                 re.I), 0.91),
+    (re.compile(r"Computing HMBR",                    re.I), 0.93),
+    (re.compile(r"Saved HMBR:",                       re.I), 0.97),
     (re.compile(r"variant_fates.*written",            re.I), 1.00),
 ]
 

@@ -62,11 +62,11 @@ function process_and_join(folder_path::String; suffix::AbstractString="", latest
             stats[:, :Percentage] = round.((stats.Dropped_Count ./ stats.Total_Count) .* 100, digits=2)
 
             for row in eachrow(stats)
-                println("$(row.Dropped_Count) peptides dropped from locus $(row.Locus) due to stop codon(s) in the peptide ($(row.Percentage)% of total for locus $(row.Locus))")
+                println("Warning: $(row.Dropped_Count) stop-codon peptides at locus $(row.Locus) ($(row.Percentage)%)")
             end
         end
     else
-        println("Column 'Locus' not found after join. This usually means no matching peptides between NetMHCpan output and peptide labels. Skipping locus-based stats.")
+        println("Warning: no 'Locus' column after join — skipping locus stats")
     end
 
     return joined_df
@@ -91,14 +91,12 @@ function main()
     # Drop rows where MHC is missing
     filtered_df = filter(row -> !ismissing(row.MHC), reshaped_df)
 
-    println("Sorting by Locus...")
+    println("Sorting...")
     sort!(filtered_df, :Locus)
 
     output_path = resolve_write(joinpath(folder_path, "processed_peptides.csv"); suffix=suffix)
-    println("Saving results to $output_path...")
+    println("Saved processed peptides → $output_path")
     CSV.write(output_path, filtered_df)
-
-    println("Processing completed successfully!")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

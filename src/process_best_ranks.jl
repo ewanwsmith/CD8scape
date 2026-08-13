@@ -92,8 +92,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
     #     so the dict's string memory stays O(unique values), not O(groups).
     #
     # Dict value layout: (best_EL_Rank::Float64, frame::String, sequence::String)
-    println("Reading input file: $input_file")
-    println("Streaming CSV to compute per-(Locus,MHC,Mutation) best ranks...")
+    println("Reading: $input_file")
+    println("Scanning rows...")
 
     GroupKey  = Tuple{Int,String,String}            # (Locus, MHC, Mutation)
     GroupVal  = Tuple{Float64,String,String}        # (best_EL_Rank, Frame, Sequence)
@@ -199,19 +199,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
             processed_count += 1
             if row_count % 10_000_000 == 0
-                println("  $(row_count ÷ 1_000_000)M rows scanned "
-                        * "($(processed_count) retained, "
-                        * "$(length(best_A_dict))+$(length(best_D_dict)) groups)")
+                println("  $(row_count ÷ 1_000_000)M rows scanned")
             end
         end
     catch e
         println("Error streaming input file: $e")
         exit(1)
     end
-    println("Successfully processed $(row_count) rows "
-            * "($(processed_count) passed filters, "
-            * "$(length(best_A_dict)) ancestral groups, "
-            * "$(length(best_D_dict)) derived groups)")
+    println("$(row_count) rows processed ($(length(best_A_dict)) ancestral, $(length(best_D_dict)) derived groups)")
 
     # -------------------------------------------------------------------------
     # Convert accumulated dicts into DataFrames matching the downstream schema.
@@ -240,13 +235,13 @@ if abspath(PROGRAM_FILE) == @__FILE__
         )
     end
 
-    println("Materialising best ranks for ancestral peptides (_A)...")
+    println("Building ancestral ranks...")
     best_C = dict_to_df(best_A_dict, "A")
-    println("Found best ranks for ancestral peptides: $(nrow(best_C)) entries")
+    println("  $(nrow(best_C)) ancestral entries")
 
-    println("Materialising best ranks for derived peptides (_D)...")
+    println("Building derived ranks...")
     best_V = dict_to_df(best_D_dict, "D")
-    println("Found best ranks for derived peptides: $(nrow(best_V)) entries")
+    println("  $(nrow(best_V)) derived entries")
 
     # Free the accumulator dicts early; everything we need now lives in the
     # small-ish best_C / best_V DataFrames. Help the GC reclaim the pools.
@@ -319,7 +314,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
             ]
         end
     else
-        println("Warning: frames.csv not found in $folder_path. Protein labels will not be mapped.")
+        println("Warning: frames.csv not found — protein labels not mapped")
     end
 
 # Reorder: put Frame, Locus, Mutation first
@@ -336,10 +331,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
 # Save best_ranks.csv
     best_ranks_file = resolve_write(joinpath(folder_path, "best_ranks.csv"); suffix=suffix)
     CSV.write(best_ranks_file, best_ranks)
-    println("Saved best ranks to $best_ranks_file")
+    println("Saved best ranks: $best_ranks_file")
 
 # Pivot best_ranks to have separate columns for HMBR_A and HMBR_D
-    println("Calculating harmonic mean best ranks (HMBR) per Frame/Locus/Mutation...")
+    println("Computing HMBR...")
     if !isempty(best_ranks)
         # Compute harmonic mean while ignoring NaN/missing/zero values
         function safe_harmmean(xs)
@@ -368,7 +363,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # Warn if no derived data is present
     if !("HMBR_D" in names(pivot_df))
-        println("Warning: No derived peptides found. Skipping fold change calculations and HMBR_D output.")
+        println("Warning: no derived peptides — skipping fold change")
     end
 
     # Identify and report missing/NaN values before fold change calculation (per Locus, Mutation)
@@ -386,7 +381,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         end
     end
     for (locus, change, which) in missing_msgs
-        println("Fold change could not be calculated for locus $(locus) (change $(change)) due to missing $(which) rank.")
+        println("Warning: no fold change for locus $(locus)/$(change) (missing $(which) rank)")
     end
 
     # Filter out loci where both HMBR_A and HMBR_D are greater than 2 (non-binding)
@@ -398,7 +393,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
             !(ismissing(hA) || (hA isa AbstractFloat && isnan(hA)) || ismissing(hD) || (hD isa AbstractFloat && isnan(hD))) && !(hA > 2 && hD > 2)
         end, pivot_df)
     removed_count = before_filter - nrow(pivot_df)
-    println("Removed $removed_count loci where both ancestral and derived states were predicted to be non-binding (HMBR > 2)")
+    println("Removed $removed_count non-binding loci (HMBR > 2)")
 
     # Calculate fold change (Derived / Ancestral) for all valid rows
     if ("HMBR_A" in names(pivot_df)) && ("HMBR_D" in names(pivot_df))
@@ -423,12 +418,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
                 select!(per_allele_df, :Frame, :Locus, :Mutation, :MHC, :ELBR_A, :Peptide_A, :ELBR_D, :Peptide_D, :foldchange_BR, :log2_foldchange_BR)
                 per_allele_file = resolve_write(joinpath(folder_path, "per_allele_best_ranks.csv"); suffix=suffix)
                 CSV.write(per_allele_file, per_allele_df)
-                println("Saved per-allele escape log2 fold changes to $per_allele_file")
+                println("Saved per-allele: $per_allele_file")
             else
-                println("Warning: No alleles with ancestral EL_Rank ≤ 2 found. per_allele_best_ranks.csv will not be written.")
+                println("Warning: no alleles with ancestral EL_Rank ≤ 2 — per_allele_best_ranks.csv not written")
             end
         else
-            println("Warning: Missing ancestral or derived peptide data. per_allele_best_ranks.csv will not be written.")
+            println("Warning: missing ancestral or derived peptides — per_allele_best_ranks.csv not written")
         end
     end
 
@@ -453,9 +448,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # Save harmonic mean results with fold change
     harmonic_mean_file = resolve_write(joinpath(folder_path, "harmonic_mean_best_ranks.csv"); suffix=suffix)
     CSV.write(harmonic_mean_file, pivot_df)
-    println("Saved harmonic mean best ranks to $harmonic_mean_file")
+    println("Saved HMBR: $harmonic_mean_file")
 
     else
-        println("No valid best rank data available. Skipping harmonic mean calculations.")
+        println("Warning: no valid best rank data — skipping HMBR")
     end
 end
