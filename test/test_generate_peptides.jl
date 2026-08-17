@@ -217,6 +217,7 @@ end
             Variant       = ["T"],
             Start         = [1],
             End           = [12],
+            Region        = ["1,12"],
             Consensus_sequence = ["ATGCCCGAATTT"],
             Description   = ["Frame1"],
         )
