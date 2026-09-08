@@ -438,7 +438,7 @@ class TestProgressEstimator(unittest.TestCase):
         est.start_step(1)
         est.ingest_line("Chunk 1/1, batch 1/1 (100 peptides, 6 alleles). 100% complete.")
         before = est.overall_fraction
-        est.ingest_line("Sorting by Locus...")
+        est.ingest_line("Sorting...")
         self.assertGreater(est.overall_fraction, before)
 
     def test_n_threads_property(self):

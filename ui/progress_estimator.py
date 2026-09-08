@@ -21,7 +21,7 @@ Each CD8scape run step (run / run_supertype) contains two distinct phases:
     Three Julia scripts run sequentially after netMHCpan finishes:
 
       process_scores.jl     — joins netMHCpan TSV with peptide labels.
-                              First output: "Sorting by Locus…"
+                              First output: "Sorting..."
       process_best_ranks.jl — streams processed_output.csv, computing
                               per-(Locus, MHC, Mutation) best ranks.
                               Progress marker every 10 M rows:
