@@ -509,6 +509,55 @@ class TestConsensusFilenameCase(unittest.TestCase):
         self.assertNotIn('"Consensus.fa"', text)
 
 
+class TestDataFilenameCasing(unittest.TestCase):
+    """Input files under data/ must use the lowercase names the pipeline expects.
+
+    macOS is case-insensitive, so a capitalised `Alleles.txt` still opens
+    locally and the mistake stays invisible; on Linux the pipeline cannot find
+    it and reports the file as missing. Git records the exact committed name,
+    so ask git rather than the filesystem.
+    """
+
+    # Names the Julia scripts and the GUI look for verbatim.
+    CANONICAL = ("alleles.txt", "consensus.fa", "supertype_panel.csv")
+
+    def _tracked_data_files(self) -> list[Path]:
+        result = subprocess.run(
+            ["git", "ls-files", "data"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            self.skipTest("not a git repository")
+        return [Path(line) for line in result.stdout.splitlines() if line]
+
+    def test_input_files_are_lowercase(self):
+        offenders = [
+            str(path)
+            for path in self._tracked_data_files()
+            if path.name.lower() in self.CANONICAL and path.name != path.name.lower()
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "data files must use the lowercase names the pipeline looks for; "
+            f"these are capitalised: {offenders}",
+        )
+
+    def test_stanevich_alleles_file_is_lowercase(self):
+        names = {
+            path.name
+            for path in self._tracked_data_files()
+            if path.parent.name == "Stanevich_et_al"
+        }
+        self.assertIn(
+            "alleles.txt",
+            names,
+            f"Stanevich_et_al must ship alleles.txt; tracked names: {sorted(names)}",
+        )
+
+
 class TestNetMHCpanOutputFilenameCase(unittest.TestCase):
     """Fix #3: run_netMHCpan.jl must write netmhcpan_output.tsv (all lowercase)."""
 

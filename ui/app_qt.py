@@ -422,6 +422,14 @@ QLabel#callout_warn {
     padding: 8px 12px;
     font-size: 12px;
 }
+QLabel#callout_ok {
+    background-color: #e8f6ec;
+    color: #1a5c2e;
+    border: 1px solid #a8d8b8;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 12px;
+}
 
 /* ── tabs ── */
 QTabWidget::pane {
@@ -1704,19 +1712,56 @@ class RunPage(QWidget):
         self._detail_lbl.setText(choice.detail)
 
         if key == "standard":
-            self._alleles_warn.setText(
-                "Requires alleles.txt in your data folder.\n"
-                "Format: one HLA allele per line, e.g.  HLA-A03:01"
+            self._set_requirement_callout(
+                "alleles.txt",
+                "Format: one HLA allele per line, e.g.  HLA-A03:01",
             )
             self._std_opts.setVisible(True)
             self._super_opts.setVisible(False)
         else:
-            self._alleles_warn.setText(
-                "Requires supertype_panel.csv in your data folder.\n"
-                "Format: two columns — Allele, Frequency"
+            self._set_requirement_callout(
+                "supertype_panel.csv",
+                "Format: two columns — Allele, Frequency",
             )
             self._std_opts.setVisible(False)
             self._super_opts.setVisible(True)
+
+    def _set_requirement_callout(self, filename: str, fmt: str) -> None:
+        """Say whether the file this run type needs is actually present.
+
+        This callout used to be shown unconditionally, so a correctly populated
+        folder still displayed a yellow "Requires ..." box that reads like an
+        error. Check the chosen folder and report what is actually true.
+
+        The existence check deliberately mirrors what the Julia side does
+        (a plain path test), so it inherits the filesystem's own case rules and
+        cannot claim a file is present that the pipeline would then fail to
+        open.
+        """
+        folder = self._app.folder_path
+        present = bool(folder) and (folder / filename).is_file()
+
+        if present:
+            self._alleles_warn.setObjectName("callout_ok")
+            self._alleles_warn.setText(f"\u2713  Found {filename} in {folder.name}.")
+        elif folder is None:
+            self._alleles_warn.setObjectName("callout_warn")
+            self._alleles_warn.setText(
+                f"Requires {filename} in your data folder.\n{fmt}"
+            )
+        else:
+            self._alleles_warn.setObjectName("callout_warn")
+            self._alleles_warn.setText(
+                f"{filename} not found in {folder.name}.\n{fmt}"
+            )
+
+        # Re-polish so the stylesheet picks up the new objectName.
+        self._alleles_warn.style().unpolish(self._alleles_warn)
+        self._alleles_warn.style().polish(self._alleles_warn)
+
+    def refresh(self) -> None:
+        """Re-check the requirement callout (the folder may have changed)."""
+        self._update_detail()
 
     def current_option_args(self) -> List[str]:
         key = self._app.run_key
@@ -2927,6 +2972,8 @@ class CD8scapeApp(QMainWindow):
 
         if step == self._STEP_DATA:
             self.data_page.refresh()
+        elif step == self._STEP_RUN:
+            self.run_page.refresh()
 
     def _go_back(self) -> None:
         if self._current_step > 0:
