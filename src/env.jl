@@ -1,8 +1,55 @@
 using Pkg
 using TOML
 
-# Activate the src environment explicitly (so prep works from any cwd)
-Pkg.activate(@__DIR__, io = devnull)
+# ---------------------------------------------------------------------------
+# Project environment
+# ---------------------------------------------------------------------------
+# Activate the *repository root* explicitly, so prep works from any cwd.
+#
+# This must be the root, not src/: CD8scape.jl launches every worker script
+# with `--project=.` from the repo root, so the root environment is the one the
+# pipeline actually runs in. Activating src/ here meant `prep` installed and
+# instantiated a second, parallel environment that nothing else ever used.
+const PROJECT_DIR = normpath(joinpath(@__DIR__, ".."))
+
+"""
+    stale_manifest(dir) -> Union{String,Nothing}
+
+Path of `dir`'s Manifest.toml if it was resolved by a different Julia minor
+series, otherwise `nothing`.
+
+A manifest written by e.g. Julia 1.13 records stdlibs that do not exist in
+1.11 (JuliaSyntaxHighlighting, ...). Pkg then aborts with "Could not locate
+the source code for the X package" and cannot recover on its own.
+"""
+function stale_manifest(dir::AbstractString)
+    path = joinpath(dir, "Manifest.toml")
+    isfile(path) || return nothing
+    recorded = try
+        get(TOML.parsefile(path), "julia_version", nothing)
+    catch
+        return nothing   # unparseable — let Pkg report it in its own words
+    end
+    recorded === nothing && return nothing
+    v = try
+        VersionNumber(recorded)
+    catch
+        return nothing
+    end
+    return (v.major, v.minor) == (VERSION.major, VERSION.minor) ? nothing : path
+end
+
+# A manifest from another Julia series cannot be instantiated here. Move it
+# aside (rather than deleting it) and let Pkg re-resolve from Project.toml.
+let stale = stale_manifest(PROJECT_DIR)
+    if stale !== nothing
+        backup = stale * ".incompatible"
+        mv(stale, backup; force = true)
+        @warn "Manifest.toml was resolved by a different Julia version; re-resolving from Project.toml. Previous file kept at $backup."
+    end
+end
+
+Pkg.activate(PROJECT_DIR, io = devnull)
 
 # Ensure the environment has a valid Project/Manifest
 try
@@ -19,21 +66,17 @@ Falls back gracefully if a file is missing.
 """
 function collect_declared_deps()
     dep_names = Set{String}()
-    # Candidates: project root and src env
-    root_proj = abspath(joinpath(@__DIR__, "..", "Project.toml"))
-    src_proj  = abspath(joinpath(@__DIR__, "Project.toml"))
-    for path in (root_proj, src_proj)
-        if isfile(path)
-            try
-                tbl = TOML.parsefile(path)
-                if haskey(tbl, "deps")
-                    for (name, _) in tbl["deps"]
-                        push!(dep_names, String(name))
-                    end
+    path = joinpath(PROJECT_DIR, "Project.toml")
+    if isfile(path)
+        try
+            tbl = TOML.parsefile(path)
+            if haskey(tbl, "deps")
+                for (name, _) in tbl["deps"]
+                    push!(dep_names, String(name))
                 end
-            catch
-                # ignore parse errors and continue
             end
+        catch
+            # ignore parse errors and fall back to the minimal set below
         end
     end
     # If no files found or empty, use minimal required set for this pipeline
@@ -54,8 +97,14 @@ end
 installed = try
     keys(Pkg.dependencies())
 catch
-    # If manifest is missing, instantiate then retry
-    Pkg.instantiate(; io = devnull)
+    # If the manifest is missing or unusable, instantiate and retry. Both steps
+    # must be guarded: a broken manifest makes instantiate itself throw, and an
+    # uncaught error here aborts prep before any package can be added.
+    try
+        Pkg.instantiate(; io = devnull)
+    catch err
+        @warn "Could not instantiate the existing environment; adding packages from scratch." exception = err
+    end
     try
         keys(Pkg.dependencies())
     catch

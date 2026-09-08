@@ -12,7 +12,7 @@ Run from the repo root:
     python -m pytest test/test_pipeline_integration.py -v
     python test/test_pipeline_integration.py
 
-Prerequisites: Julia must be on PATH with the src/ project instantiated.
+Prerequisites: Julia must be on PATH with the repo-root project instantiated.
 Tests that require Julia are skipped when `julia` is not found on PATH.
 """
 
@@ -31,6 +31,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = REPO_ROOT / "src"
 EXAMPLE_DATA = REPO_ROOT / "data" / "Example_data"
 
+# Reuse the GUI launcher's Julia resolution so the tests exercise the same
+# pinned interpreter the pipeline actually runs on (see ui/runner.py). Running
+# them on an unpinned `julia` tests a version the pipeline never uses.
+sys.path.insert(0, str(REPO_ROOT / "ui"))
+try:
+    from runner import julia_launch_prefix  # type: ignore
+except Exception:  # pragma: no cover - fall back to a bare interpreter
+    julia_launch_prefix = None
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -40,10 +49,19 @@ def julia_available() -> bool:
 
 
 def run_julia(script: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """Run a Julia script from src/ with the src/ project."""
+    """Run a Julia script from src/ with the repo-root project.
+
+    The project must be the repo root, not src/: CD8scape.jl launches every
+    worker script with `--project=.` from the root, so this is the environment
+    the pipeline actually runs in.
+    """
+    if julia_launch_prefix is not None:
+        prefix = julia_launch_prefix()
+    else:
+        prefix = ["julia"]
     cmd = [
-        "julia",
-        f"--project={SRC_DIR}",
+        *prefix,
+        f"--project={REPO_ROOT}",
         str(SRC_DIR / script),
         *args,
     ]
