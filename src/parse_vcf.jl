@@ -116,7 +116,7 @@ function read_vcf_with_csv(vcf_filename)
     header = split(header_line[2:end], '\t')
     header = String.(header)  # Convert SubString{String} to String
 
-    df = CSV.read(data_io, DataFrame; delim='\t', header=header)
+    df = CSV.read(data_io, DataFrame; stringtype = String, delim='\t', header=header)
     return df
 end
 

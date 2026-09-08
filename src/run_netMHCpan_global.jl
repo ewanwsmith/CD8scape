@@ -204,7 +204,7 @@ function main()
     end
 
     # Read alleles from the supertype_panel.csv file (robust to header quirks)
-    df = CSV.read(representatives_file, DataFrame; normalizenames=true)
+    df = CSV.read(representatives_file, DataFrame; stringtype = String, normalizenames=true)
 
     # Normalize column names: strip spaces/NBSP and lowercase
     function _clean_sym(n)

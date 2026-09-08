@@ -160,8 +160,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
     println("Reading simulation: " * sim_path)
     println("Reading observed:   " * obs_path)
 
-    sim_df = CSV.read(sim_path, DataFrame)
-    obs_df = CSV.read(obs_path, DataFrame)
+    sim_df = CSV.read(sim_path, DataFrame; stringtype = String)
+    obs_df = CSV.read(obs_path, DataFrame; stringtype = String)
 
     # Ensure the fold-change column exists; for HMBR mode, recompute from A/D if missing
     hascol(df, sym) = hasproperty(df, sym)

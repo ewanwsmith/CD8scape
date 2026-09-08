@@ -121,7 +121,7 @@ function main()
     hmbr_path = resolve_read(joinpath(folder_path, "harmonic_mean_best_ranks.csv");
                              suffix=suffix, latest=latest)
     if isfile(hmbr_path)
-        for row in eachrow(CSV.read(hmbr_path, DataFrame))
+        for row in eachrow(CSV.read(hmbr_path, DataFrame; stringtype = String))
             entry = (Frame=String(row.Frame), Mutation=String(row.Mutation))
             push!(get!(hmbr_by_locus, row.Locus, []), entry)
         end

@@ -159,7 +159,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # Read the input CSV into a DataFrame with error handling
     try
-        global df = CSV.read(input_file, DataFrame)
+        global df = CSV.read(input_file, DataFrame; stringtype = String)
         println("Successfully loaded data with $(nrow(df)) rows")
     catch e
         println("Error reading input file: $e")
@@ -253,7 +253,7 @@ if !isempty(best_ranks)
     end
     println("Using allele frequency file: $(basename(freq_path))")
 
-    freq_df = CSV.read(freq_path, DataFrame)
+    freq_df = CSV.read(freq_path, DataFrame; stringtype = String)
     rename!(freq_df, Dict(names(freq_df) .=> clean_colname.(names(freq_df))))
 
     # Build a lowercase string lookup of current column names

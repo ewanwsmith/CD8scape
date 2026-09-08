@@ -260,7 +260,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # `Description`. If no match is found, we keep the original value.
     frames_file = resolve_read(joinpath(folder_path, "frames.csv"); suffix="", latest=latest)
     if isfile(frames_file)
-        frames_df = CSV.read(frames_file, DataFrame)
+        frames_df = CSV.read(frames_file, DataFrame; stringtype = String)
 
         # Parse a Region string like "77,496" or multiple coords "77,496;606,980"
         # into a vector of (start, end) tuples

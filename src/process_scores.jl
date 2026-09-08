@@ -45,8 +45,8 @@ function process_and_join(folder_path::String; suffix::AbstractString="", latest
         error("Required files not found. Ensure both processed_output.csv and peptides_labels.csv are present in $folder_path.")
     end
 
-    mhcpan_df = CSV.read(mhcpan_path, DataFrame)
-    peptides_df = CSV.read(peptides_path, DataFrame)
+    mhcpan_df = CSV.read(mhcpan_path, DataFrame; stringtype = String)
+    peptides_df = CSV.read(peptides_path, DataFrame; stringtype = String)
 
     # Perform left join: attach Peptide_label and Locus to mhcpan_df
     joined_df = leftjoin(mhcpan_df, peptides_df, on="Peptide")

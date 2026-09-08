@@ -133,7 +133,7 @@ function main()
     end
 
     # Read frames and build full variant enumeration
-    frames = CSV.read(frames_path, DataFrame)
+    frames = CSV.read(frames_path, DataFrame; stringtype = String)
     out = DataFrame(Locus=Int[], Consensus=String[], Variant=String[])
     nucleotides = ['A', 'C', 'G', 'T']
     for row in eachrow(frames)

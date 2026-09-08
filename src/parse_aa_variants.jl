@@ -168,7 +168,7 @@ function main()
 
     # Read frames.csv
     frames_path = resolve_read(joinpath(folder_path, "frames.csv"); suffix=suffix, latest=latest)
-    frames = CSV.read(frames_path, DataFrame)
+    frames = CSV.read(frames_path, DataFrame; stringtype = String)
     println("Using frames file: $frames_path")
 
     # Parse the .aa file

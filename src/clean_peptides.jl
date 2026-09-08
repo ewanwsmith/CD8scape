@@ -26,7 +26,7 @@ function process_peptides(folder_path::String)
     file_path = joinpath(folder_path, files[peptide_file])
     
     # Read the Peptides.pep file into a DataFrame
-    df = CSV.read(file_path, DataFrame)
+    df = CSV.read(file_path, DataFrame; stringtype = String)
     
     # Filter for unique values in the DataFrame (assuming one column is present)
     df_unique = unique(df)
