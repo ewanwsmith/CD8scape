@@ -35,6 +35,25 @@ from typing import Iterator, List, Optional  # Optional kept for RunResult
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 CD8SCAPE_SCRIPT: Path = REPO_ROOT / "CD8scape.jl"
 
+# ---------------------------------------------------------------------------
+# Pinned Julia version
+# ---------------------------------------------------------------------------
+# CD8scape's Manifest.toml is resolved for the Julia 1.11 LTS series. Newer
+# Julia releases (1.12+, and the 1.13 pre-releases) removed internal symbols
+# (e.g. Base.memhash_seed) that the pinned dependency versions still call, so
+# running the pipeline on them crashes inside CSV.jl/InlineStrings. Until the
+# dependencies are upgraded, we pin every invocation to 1.11.
+#
+# When Julia is managed by juliaup (the usual case), the "+<channel>" selector
+# forces that channel per-invocation without touching the user's global
+# default. Non-juliaup installs don't understand "+<channel>", so we only add
+# it when juliaup is actually present; julia_launch_prefix() raises a clear
+# error if a bare install is on the wrong version.
+#
+# CD8scape.jl propagates this pin to its worker subprocesses via
+# Sys.BINDIR + Base.julia_exename(), so the whole pipeline stays on 1.11.
+JULIA_CHANNEL: str = "1.11"
+
 
 def get_repo_root() -> Path:
     """Return the CD8scape repository root (parent of ui/)."""
@@ -76,10 +95,59 @@ def find_julia() -> str:
     if julia is None:
         raise JuliaNotFoundError(
             "The 'julia' executable was not found on your PATH.\n\n"
-            "Install Julia 1.11+ from https://julialang.org/downloads/ "
-            "and make sure the 'julia' command works in a new terminal."
+            "Install Julia 1.11 from https://julialang.org/downloads/ "
+            "(or run `juliaup add 1.11`) and make sure the 'julia' command "
+            "works in a new terminal."
         )
     return julia
+
+
+def _juliaup_available() -> bool:
+    """Return True if the juliaup version multiplexer is on PATH.
+
+    Only juliaup understands the ``julia +<channel>`` selector we use to pin
+    the version. A direct (non-juliaup) install would treat ``+1.11`` as a
+    script path and fail, so we must not pass it in that case.
+    """
+    return shutil.which("juliaup") is not None
+
+
+def julia_launch_prefix() -> List[str]:
+    """Return the argv prefix used to launch the pinned Julia version.
+
+    * With juliaup: ``[julia, "+1.11"]`` — forces the 1.11 channel for this
+      invocation only, regardless of the user's global default channel.
+    * Without juliaup: ``[julia]`` — plus a best-effort version check that
+      raises a clear error if a bare install is on an unsupported version.
+    """
+    julia = find_julia()
+    if _juliaup_available():
+        return [julia, f"+{JULIA_CHANNEL}"]
+
+    # Bare install: we can't switch versions, so verify the one we have.
+    try:
+        out = subprocess.run(
+            [julia, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
+    except Exception:
+        # If the check itself fails, don't block the run — let Julia speak.
+        return [julia]
+
+    # Output looks like "julia version 1.11.9".
+    version = out.strip().split()[-1] if out.strip() else ""
+    if not version.startswith(JULIA_CHANNEL + "."):
+        raise JuliaNotFoundError(
+            f"CD8scape is pinned to the Julia {JULIA_CHANNEL} LTS series, but "
+            f"the 'julia' on your PATH is version {version or 'unknown'}.\n\n"
+            f"Newer Julia versions crash the pipeline with the current pinned "
+            f"dependencies. Install Julia {JULIA_CHANNEL} from "
+            f"https://julialang.org/downloads/, or install juliaup and run "
+            f"`juliaup add {JULIA_CHANNEL}`."
+        )
+    return [julia]
 
 
 def check_cd8scape_script() -> Path:
@@ -100,9 +168,9 @@ def build_command(cd8scape_args: List[str]) -> List[str]:
     Using a list (never a string) means subprocess hands the arguments to the
     OS verbatim — no shell parsing, no cross-platform quoting surprises.
     """
-    julia = find_julia()
+    prefix = julia_launch_prefix()
     script = check_cd8scape_script()
-    return [julia, str(script), *cd8scape_args]
+    return [*prefix, str(script), *cd8scape_args]
 
 
 def stream_cd8scape(cd8scape_args: List[str]) -> Iterator[str]:
